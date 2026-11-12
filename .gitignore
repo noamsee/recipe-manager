@@ -1,0 +1,23 @@
+# Secrets & Environment Variables
+.env
+.env.*
+*.pem
+*.key
+*serviceAccount*.json
+*firebase-adminsdk*.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node / Build
+node_modules/
+dist/
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
