@@ -7,12 +7,12 @@
 const STORAGE_KEY = 'recipe_manager_runtime_config_v1';
 
 export const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: '',
+  apiKey: 'AIzaSyA72nMPNfsIOeUdJyd_JR4EzKYvZYHY9vI',
+  authDomain: 'recipe-manager-7df02.firebaseapp.com',
+  projectId: 'recipe-manager-7df02',
+  storageBucket: 'recipe-manager-7df02.firebasestorage.app',
+  messagingSenderId: '185063642527',
+  appId: '1:185063642527:web:85a35a9027207cae0159aa',
 };
 
 export const DEFAULT_API_URL = '';

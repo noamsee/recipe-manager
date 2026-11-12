@@ -10,7 +10,7 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: FIREBASE_PROJECT_ID
-        sync: false
+        value: recipe-manager-7df02
       - key: ALLOWED_ORIGINS
         value: https://noamsee.github.io
       - key: GEMINI_MODEL
