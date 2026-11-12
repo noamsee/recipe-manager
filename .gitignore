@@ -1,6 +1,7 @@
 # Secrets & Environment Variables
 .env
 .env.*
+!.env.example
 *.pem
 *.key
 *serviceAccount*.json

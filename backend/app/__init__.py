@@ -1,0 +1,1 @@
+"""Recipe Manager backend package."""

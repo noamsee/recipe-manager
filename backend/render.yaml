@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: recipe-manager-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: https://noamsee.github.io
+      - key: GEMINI_MODEL
+        value: gemini-2.5-flash

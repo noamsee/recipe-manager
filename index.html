@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recipe Manager</title>
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div id="toast" class="toast" hidden></div>
+
+  <!-- First-run Setup Wizard (shown only if Firebase config is not yet set) -->
+  <main id="setup-screen" class="centered-card" hidden>
+    <section class="panel">
+      <h1>Recipe Manager Setup</h1>
+      <p class="muted">
+        Paste your Firebase Web App config JSON (from Firebase Console → Project Settings) and your Render extraction API URL.
+        To preconfigure every device automatically, copy these values into <code>frontend/js/config.js</code>.
+      </p>
+      <form id="setup-form" class="stack">
+        <label>
+          Firebase Config JSON
+          <textarea id="setup-firebase-json" rows="7" required placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","appId":"..."}'></textarea>
+        </label>
+        <label>
+          Render Backend URL (optional now, required for Reel/OneNote extraction)
+          <input id="setup-api-url" type="url" placeholder="https://recipe-manager-api.onrender.com" />
+        </label>
+        <button type="submit" class="btn-primary">Save &amp; Continue</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- Sign-In Screen -->
+  <main id="auth-screen" class="centered-card" hidden>
+    <section class="panel">
+      <h1>Recipe Manager</h1>
+      <p class="muted">Your bilingual Hebrew &amp; English kitchen library.</p>
+      <button id="google-login-btn" type="button" class="btn-primary btn-full">Continue with Google</button>
+      <div class="divider"><span>or email</span></div>
+      <form id="email-auth-form" class="stack">
+        <input id="auth-email" type="email" placeholder="Email" required />
+        <input id="auth-password" type="password" placeholder="Password" required />
+        <div class="row">
+          <button type="submit" class="btn-primary">Sign In</button>
+          <button id="register-btn" type="button" class="btn-secondary">Create Account</button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <!-- Main Authenticated App Shell -->
+  <div id="app-shell" hidden>
+    <header class="topbar">
+      <div class="brand">Recipe Manager</div>
+      <nav class="topnav">
+        <button type="button" class="nav-btn active" data-nav="library">Recipes</button>
+        <button type="button" class="nav-btn" data-nav="import">+ Import Reel / OneNote</button>
+        <button type="button" class="nav-btn" data-nav="editor">+ New</button>
+        <button type="button" class="nav-btn" data-nav="shopping">Shopping List</button>
+        <button type="button" class="nav-btn" data-nav="settings">Backup &amp; Settings</button>
+      </nav>
+      <div class="user-bar">
+        <span id="user-label" class="muted"></span>
+        <button id="logout-btn" type="button" class="btn-ghost btn-sm">Sign out</button>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- Library View -->
+      <section id="view-library">
+        <div class="filter-bar">
+          <input id="search-input" type="search" placeholder="Search title, ingredients, tags (EN / עברית)..." />
+          <select id="filter-category">
+            <option value="ALL">All Categories</option>
+          </select>
+          <select id="filter-language">
+            <option value="ALL">All Languages</option>
+            <option value="he">Hebrew (עברית)</option>
+            <option value="en">English</option>
+          </select>
+          <select id="filter-dietary">
+            <option value="ALL">All Dietary</option>
+            <option value="meat">Meat</option>
+            <option value="dairy">Dairy</option>
+            <option value="parve">Parve</option>
+            <option value="vegan">Vegan</option>
+            <option value="vegetarian">Vegetarian</option>
+            <option value="gluten-free">Gluten-Free</option>
+          </select>
+        </div>
+        <p id="recipe-count" class="muted"></p>
+        <div id="recipe-grid" class="recipe-grid"></div>
+      </section>
+
+      <!-- Recipe Detail & Cook Mode -->
+      <section id="view-detail" hidden>
+        <div class="detail-toolbar">
+          <button id="detail-back-btn" type="button" class="btn-ghost">← Back</button>
+          <div class="row wrap">
+            <button id="wake-lock-btn" type="button" class="btn-secondary" data-active="false">Cook Mode: Keep Screen Awake</button>
+            <button id="detail-translate-btn" type="button" class="btn-secondary">Translate</button>
+            <button id="detail-shopping-btn" type="button" class="btn-secondary">+ Shopping List</button>
+            <button id="detail-share-btn" type="button" class="btn-secondary">Share Link</button>
+            <button id="detail-edit-btn" type="button" class="btn-secondary">Edit</button>
+            <button id="detail-delete-btn" type="button" class="btn-danger">Delete</button>
+          </div>
+        </div>
+        <p id="wake-lock-status" class="muted small"></p>
+        <div id="share-url-output" class="share-box" hidden>
+          <label>
+            Read-only Share Link (anyone with this link can view):
+            <input id="share-url-input" type="text" readonly />
+          </label>
+        </div>
+        <article id="detail-content" class="detail-card"></article>
+      </section>
+
+      <!-- Recipe Editor -->
+      <section id="view-editor" hidden>
+        <div class="panel">
+          <h2 id="editor-heading">New Recipe</h2>
+          <form id="editor-form" class="stack">
+            <div class="grid-2">
+              <label>Title <input id="edit-title" type="text" required /></label>
+              <label>Language
+                <select id="edit-language">
+                  <option value="en">English (LTR)</option>
+                  <option value="he">Hebrew (RTL)</option>
+                </select>
+              </label>
+            </div>
+            <div class="grid-4">
+              <label>Category <input id="edit-category" type="text" placeholder="Main, Dessert..." /></label>
+              <label>Servings <input id="edit-servings" type="number" min="1" /></label>
+              <label>Prep (min) <input id="edit-prep" type="number" min="0" /></label>
+              <label>Cook (min) <input id="edit-cook" type="number" min="0" /></label>
+            </div>
+            <label>Original Source URL <input id="edit-source-url" type="url" placeholder="https://www.instagram.com/reel/..." /></label>
+            <label>Tags (comma-separated) <input id="edit-tags" type="text" placeholder="quick, pasta, weekend" /></label>
+            <fieldset class="dietary-box">
+              <legend>Dietary Tags</legend>
+              <label><input type="checkbox" name="edit-dietary" value="meat" /> Meat</label>
+              <label><input type="checkbox" name="edit-dietary" value="dairy" /> Dairy</label>
+              <label><input type="checkbox" name="edit-dietary" value="parve" /> Parve</label>
+              <label><input type="checkbox" name="edit-dietary" value="vegan" /> Vegan</label>
+              <label><input type="checkbox" name="edit-dietary" value="vegetarian" /> Vegetarian</label>
+              <label><input type="checkbox" name="edit-dietary" value="gluten-free" /> Gluten-Free</label>
+            </fieldset>
+            <label>
+              Photo / Thumbnail (compressed automatically for Spark tier)
+              <input id="edit-thumb-file" type="file" accept="image/*" />
+            </label>
+            <img id="edit-thumb-preview" class="thumb-preview" hidden alt="Preview" />
+            <label>
+              Ingredients (one per line)
+              <textarea id="edit-ingredients" rows="6" placeholder="250 g pasta&#10;2 כפות שמן זית"></textarea>
+            </label>
+            <label>
+              Steps (one per line)
+              <textarea id="edit-steps" rows="6" placeholder="Boil salted water..."></textarea>
+            </label>
+            <label>
+              Personal Notes
+              <textarea id="edit-notes" rows="3" placeholder="Needs less salt next time..."></textarea>
+            </label>
+            <div class="row">
+              <button type="submit" class="btn-primary">Save Recipe</button>
+              <button id="editor-cancel-btn" type="button" class="btn-ghost">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Import Hub -->
+      <section id="view-import" hidden>
+        <div class="panel">
+          <h2>Import Recipes</h2>
+          <div class="tab-bar">
+            <button type="button" class="tab-btn active" data-import-tab="single-reel">Single Reel Link</button>
+            <button type="button" class="tab-btn" data-import-tab="batch-whatsapp">Batch &amp; WhatsApp .txt</button>
+            <button type="button" class="tab-btn" data-import-tab="onenote">OneNote Export</button>
+            <button type="button" class="tab-btn" data-import-tab="paste-text">Paste Text</button>
+          </div>
+
+          <div id="pane-single-reel" class="stack">
+            <form id="single-reel-form" class="stack">
+              <label>
+                Facebook or Instagram Reel URL
+                <input id="single-reel-url" type="url" required placeholder="https://www.instagram.com/reel/..." />
+              </label>
+              <button type="submit" class="btn-primary">Extract Recipe from Reel</button>
+            </form>
+            <p id="single-reel-status" class="muted"></p>
+            <div id="reel-fallback-box" class="fallback-box" hidden>
+              <p><strong>Manual Caption Fallback:</strong> Paste the Reel caption or spoken notes below and Gemini will structure it.</p>
+              <textarea id="fallback-caption-text" rows="5" placeholder="Paste Reel caption here..."></textarea>
+              <button id="fallback-extract-btn" type="button" class="btn-primary">Parse Pasted Caption</button>
+            </div>
+          </div>
+
+          <div id="pane-batch-whatsapp" class="stack" hidden>
+            <label>
+              Upload WhatsApp "Export Chat (Without Media)" .txt file
+              <input id="whatsapp-file-input" type="file" accept=".txt,text/plain" />
+            </label>
+            <p id="batch-summary" class="muted"></p>
+            <label>
+              Queued Facebook / Instagram Reel URLs (one per line)
+              <textarea id="batch-urls-input" rows="7" placeholder="https://www.instagram.com/reel/...&#10;https://www.facebook.com/share/r/..."></textarea>
+            </label>
+            <button id="batch-run-btn" type="button" class="btn-primary">Process Batch Queue</button>
+            <div id="batch-log" class="batch-log"></div>
+          </div>
+
+          <div id="pane-onenote" class="stack" hidden>
+            <label>
+              Upload OneNote Export (.html, .docx, .pdf, .txt)
+              <input id="onenote-file-input" type="file" accept=".html,.htm,.docx,.pdf,.txt,.md" />
+            </label>
+            <button id="onenote-parse-btn" type="button" class="btn-primary">Parse OneNote File</button>
+            <p id="onenote-status" class="muted"></p>
+            <div id="onenote-preview-list" class="stack"></div>
+            <button id="onenote-save-btn" type="button" class="btn-primary" hidden>Import Selected Recipes</button>
+          </div>
+
+          <div id="pane-paste-text" class="stack" hidden>
+            <form id="paste-text-form" class="stack">
+              <label>
+                Paste any recipe text (Hebrew or English)
+                <textarea id="paste-raw-text" rows="7" required placeholder="Paste ingredients and instructions..."></textarea>
+              </label>
+              <label>
+                Optional Source URL
+                <input id="paste-raw-url" type="url" placeholder="https://..." />
+              </label>
+              <button type="submit" class="btn-primary">Structure &amp; Save Recipe</button>
+            </form>
+            <p id="paste-text-status" class="muted"></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Supermarket Shopping List -->
+      <section id="view-shopping" hidden>
+        <div class="panel">
+          <div class="row between">
+            <h2>Supermarket Shopping List</h2>
+            <button id="shopping-clear-btn" type="button" class="btn-ghost btn-sm">Clear Checked</button>
+          </div>
+          <form id="shopping-add-form" class="row">
+            <input id="shopping-new-item" type="text" placeholder="Add item (e.g. 2 tomatoes / שמן זית)..." />
+            <button type="submit" class="btn-primary">Add</button>
+          </form>
+          <ul id="shopping-items" class="shopping-list"></ul>
+        </div>
+      </section>
+
+      <!-- Backup & Settings -->
+      <section id="view-settings" hidden>
+        <div class="panel stack">
+          <h2>Backup &amp; Export</h2>
+          <p class="muted">Download a portable copy of all your recipes anytime.</p>
+          <div class="row wrap">
+            <button id="export-json-btn" type="button" class="btn-secondary">Export All as JSON</button>
+            <button id="export-md-btn" type="button" class="btn-secondary">Export All as Markdown</button>
+          </div>
+          <hr />
+          <h2>Extraction Server Settings</h2>
+          <form id="settings-form" class="stack">
+            <label>
+              Render Backend API URL
+              <input id="settings-api-url" type="url" placeholder="https://recipe-manager-api.onrender.com" />
+            </label>
+            <button type="submit" class="btn-primary">Save Settings</button>
+          </form>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

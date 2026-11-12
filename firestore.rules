@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Add partner/family email addresses here to share the same household library.
+    function isHouseholdMember() {
+      return request.auth != null && (
+        request.auth.token.email in [
+          // "family@example.com"
+        ]
+      );
+    }
+
+    function canAccessOwnedDoc(docData) {
+      return request.auth != null && (
+        docData.ownerUid == request.auth.uid ||
+        isHouseholdMember()
+      );
+    }
+
+    match /recipes/{recipeId} {
+      allow read, update, delete: if canAccessOwnedDoc(resource.data);
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /recipeThumbnails/{recipeId} {
+      allow read, update, delete: if canAccessOwnedDoc(resource.data);
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /shoppingList/{itemId} {
+      allow read, update, delete: if canAccessOwnedDoc(resource.data);
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /sharedRecipes/{shareId} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+      allow update, delete: if canAccessOwnedDoc(resource.data);
+    }
+  }
+}
