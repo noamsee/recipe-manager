@@ -15,7 +15,7 @@ export const DEFAULT_FIREBASE_CONFIG = {
   appId: '1:185063642527:web:85a35a9027207cae0159aa',
 };
 
-export const DEFAULT_API_URL = '';
+export const DEFAULT_API_URL = 'https://recipe-manager-api-z9ea.onrender.com';
 
 /**
  * Load merged configuration (defaults overridden by localStorage if present).
