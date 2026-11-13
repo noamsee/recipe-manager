@@ -13,7 +13,7 @@ import {
   onAuthStateChanged,
 } from 'https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js';
 import { getFirestore } from 'https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js';
-import { getAppConfig, isFirebaseConfigured } from './config.js';
+import { getAppConfig, isFirebaseConfigured } from './config.js?v=3';
 
 let cached = null;
 

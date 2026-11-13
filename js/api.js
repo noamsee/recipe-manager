@@ -2,8 +2,8 @@
  * Client for the Render Python FastAPI extraction & translation service.
  */
 
-import { getAppConfig } from './config.js';
-import { getCurrentIdToken } from './firebase-client.js';
+import { getAppConfig } from './config.js?v=3';
+import { getCurrentIdToken } from './firebase-client.js?v=3';
 
 function resolveApiUrl() {
   const { apiUrl } = getAppConfig();

@@ -2,10 +2,10 @@
  * Public read-only shared recipe page logic (share.html?id=<shareId>).
  */
 
-import { isFirebaseConfigured } from './config.js';
-import { loadSharedRecipe } from './recipes.js';
-import { applyDirection } from './rtl.js';
-import { setWakeLockEnabled } from './cook-mode.js';
+import { isFirebaseConfigured } from './config.js?v=3';
+import { loadSharedRecipe } from './recipes.js?v=3';
+import { applyDirection } from './rtl.js?v=3';
+import { setWakeLockEnabled } from './cook-mode.js?v=3';
 
 const root = document.getElementById('share-root');
 const wakeBtn = document.getElementById('share-wake-btn');

@@ -26,6 +26,11 @@ export function getAppConfig() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) saved = JSON.parse(raw);
+    // If an older empty config was saved in localStorage, discard it
+    if (saved && (!saved.firebase || !saved.firebase.apiKey)) {
+      localStorage.removeItem(STORAGE_KEY);
+      saved = null;
+    }
   } catch {
     saved = null;
   }

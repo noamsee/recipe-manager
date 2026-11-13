@@ -2,24 +2,30 @@
  * Main SPA controller for Recipe Manager.
  */
 
-import { translateRecipe } from './api.js';
-import { getAppConfig, isFirebaseConfigured, saveAppConfig } from './config.js';
-import { isWakeLockActive, setWakeLockEnabled } from './cook-mode.js';
-import { downloadTextFile, recipesToJson, recipesToMarkdown } from './export.js';
+import { translateRecipe } from './api.js?v=3';
+import {
+  DEFAULT_API_URL,
+  DEFAULT_FIREBASE_CONFIG,
+  getAppConfig,
+  isFirebaseConfigured,
+  saveAppConfig,
+} from './config.js?v=3';
+import { isWakeLockActive, setWakeLockEnabled } from './cook-mode.js?v=3';
+import { downloadTextFile, recipesToJson, recipesToMarkdown } from './export.js?v=3';
 import {
   logoutUser,
   registerWithEmail,
   signInWithEmail,
   signInWithGoogle,
   subscribeAuth,
-} from './firebase-client.js';
+} from './firebase-client.js?v=3';
 import {
   buildBatchQueue,
   extractRecipesFromOneNoteFile,
   processBatchQueue,
   runCaptionFallbackExtraction,
   runSingleReelExtraction,
-} from './importer.js';
+} from './importer.js?v=3';
 import {
   compressImageToDataUri,
   createOrUpdateShareLink,
@@ -27,8 +33,8 @@ import {
   filterRecipes,
   loadUserRecipes,
   saveRecipe,
-} from './recipes.js';
-import { applyDirection } from './rtl.js';
+} from './recipes.js?v=3';
+import { applyDirection } from './rtl.js?v=3';
 import {
   addShoppingItems,
   addSingleShoppingItem,
@@ -36,7 +42,7 @@ import {
   loadShoppingList,
   removeShoppingItem,
   toggleShoppingItem,
-} from './shopping-list.js';
+} from './shopping-list.js?v=3';
 
 const state = {
   user: null,
@@ -822,22 +828,36 @@ function init() {
   const cfg = getAppConfig();
   $('settings-api-url').value = cfg.apiUrl;
 
+  const setupFbInput = $('setup-firebase-json');
+  if (setupFbInput && !setupFbInput.value.trim()) {
+    setupFbInput.value = JSON.stringify(DEFAULT_FIREBASE_CONFIG, null, 2);
+  }
+  const setupApiInput = $('setup-api-url');
+  if (setupApiInput && !setupApiInput.value.trim()) {
+    setupApiInput.value = DEFAULT_API_URL;
+  }
+
   if (!isFirebaseConfigured(cfg)) {
     switchTopLevelScreen('setup-screen');
     return;
   }
 
-  subscribeAuth(async (user) => {
-    state.user = user;
-    if (!user) {
-      switchTopLevelScreen('auth-screen');
-      return;
-    }
-    $('user-label').textContent = user.email || user.displayName || 'Signed in';
-    switchTopLevelScreen('app-shell');
-    switchView('library');
-    await Promise.all([refreshLibrary(), refreshShoppingList()]);
-  });
+  try {
+    subscribeAuth(async (user) => {
+      state.user = user;
+      if (!user) {
+        switchTopLevelScreen('auth-screen');
+        return;
+      }
+      $('user-label').textContent = user.email || user.displayName || 'Signed in';
+      switchTopLevelScreen('app-shell');
+      switchView('library');
+      await Promise.all([refreshLibrary(), refreshShoppingList()]);
+    });
+  } catch (err) {
+    console.error('Failed to initialize Firebase Auth:', err);
+    switchTopLevelScreen('auth-screen');
+  }
 }
 
 init();
