@@ -2,30 +2,30 @@
  * Main SPA controller for Recipe Manager.
  */
 
-import { translateRecipe } from './api.js?v=3';
+import { logApi, subscribeApiLogs, translateRecipe } from './api.js?v=4';
 import {
   DEFAULT_API_URL,
   DEFAULT_FIREBASE_CONFIG,
   getAppConfig,
   isFirebaseConfigured,
   saveAppConfig,
-} from './config.js?v=3';
-import { isWakeLockActive, setWakeLockEnabled } from './cook-mode.js?v=3';
-import { downloadTextFile, recipesToJson, recipesToMarkdown } from './export.js?v=3';
+} from './config.js?v=4';
+import { isWakeLockActive, setWakeLockEnabled } from './cook-mode.js?v=4';
+import { downloadTextFile, recipesToJson, recipesToMarkdown } from './export.js?v=4';
 import {
   logoutUser,
   registerWithEmail,
   signInWithEmail,
   signInWithGoogle,
   subscribeAuth,
-} from './firebase-client.js?v=3';
+} from './firebase-client.js?v=4';
 import {
   buildBatchQueue,
   extractRecipesFromOneNoteFile,
   processBatchQueue,
   runCaptionFallbackExtraction,
   runSingleReelExtraction,
-} from './importer.js?v=3';
+} from './importer.js?v=4';
 import {
   compressImageToDataUri,
   createOrUpdateShareLink,
@@ -33,8 +33,8 @@ import {
   filterRecipes,
   loadUserRecipes,
   saveRecipe,
-} from './recipes.js?v=3';
-import { applyDirection } from './rtl.js?v=3';
+} from './recipes.js?v=4';
+import { applyDirection } from './rtl.js?v=4';
 import {
   addShoppingItems,
   addSingleShoppingItem,
@@ -42,7 +42,7 @@ import {
   loadShoppingList,
   removeShoppingItem,
   toggleShoppingItem,
-} from './shopping-list.js?v=3';
+} from './shopping-list.js?v=4';
 
 const state = {
   user: null,
@@ -78,8 +78,9 @@ function escapeHtml(value) {
 }
 
 function switchTopLevelScreen(screenId) {
-  for (const id of ['setup-screen', 'auth-screen', 'app-shell']) {
-    $(id).hidden = id !== screenId;
+  for (const id of ['auth-screen', 'app-shell']) {
+    const el = $(id);
+    if (el) el.hidden = id !== screenId;
   }
 }
 
@@ -420,19 +421,6 @@ function renderOneNotePreview() {
 }
 
 function bindEvents() {
-  // Setup wizard form
-  $('setup-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    try {
-      const fbJson = JSON.parse($('setup-firebase-json').value.trim());
-      const apiUrl = $('setup-api-url').value.trim();
-      saveAppConfig({ firebase: fbJson, apiUrl });
-      window.location.reload();
-    } catch (err) {
-      showToast(`Invalid Firebase JSON config: ${err.message}`, true);
-    }
-  });
-
   // Auth handlers
   $('google-login-btn').addEventListener('click', async () => {
     try {
@@ -640,22 +628,62 @@ function bindEvents() {
     });
   });
 
-  // Single Reel extraction + fallback
+  // Single Reel extraction + fallback + live diagnostics
+  const debugBox = $('reel-debug-box');
+  const debugOutput = $('reel-debug-output');
+  const toggleDebugBtn = $('toggle-debug-btn');
+  const copyDebugBtn = $('copy-debug-btn');
+
+  if (toggleDebugBtn) {
+    toggleDebugBtn.addEventListener('click', () => {
+      if (debugBox) debugBox.hidden = !debugBox.hidden;
+    });
+  }
+
+  if (copyDebugBtn) {
+    copyDebugBtn.addEventListener('click', async () => {
+      if (debugOutput) {
+        await navigator.clipboard?.writeText(debugOutput.textContent).catch(() => {});
+        showToast('Diagnostics log copied to clipboard!');
+      }
+    });
+  }
+
+  subscribeApiLogs((line, full) => {
+    if (debugOutput) {
+      debugOutput.textContent = full;
+      debugOutput.scrollTop = debugOutput.scrollHeight;
+    }
+  });
+
   $('single-reel-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const url = $('single-reel-url').value.trim();
     const statusEl = $('single-reel-status');
+    const extractBtn = $('extract-reel-btn');
     $('reel-fallback-box').hidden = true;
+    if (extractBtn) {
+      extractBtn.disabled = true;
+      extractBtn.textContent = 'Extracting...';
+    }
+
+    logApi(`--- NEW REEL EXTRACTION ---`);
+    logApi(`Target URL: ${url}`);
+
     try {
       const result = await runSingleReelExtraction(url, '', (msg) => {
         statusEl.textContent = msg;
+        logApi(`[Progress] ${msg}`);
       });
       if (result.status === 'blocked') {
-        statusEl.textContent = result.message;
+        logApi(`Extraction requires manual fallback: ${result.message}`);
+        statusEl.innerHTML = `<span style="color: #b42318; font-weight: 600;">⚠ ${escapeHtml(result.message)}</span>`;
         $('reel-fallback-box').hidden = false;
         $('fallback-caption-text').value = result.rawCaption || '';
         $('fallback-caption-text').dataset.sourceUrl = url;
+        if (debugBox) debugBox.hidden = false;
       } else {
+        logApi(`Extraction successful. Saving recipe "${result.recipe.title}"...`);
         const id = await saveRecipe(state.user.uid, result.recipe);
         statusEl.textContent = `Saved "${result.recipe.title}"!`;
         $('single-reel-url').value = '';
@@ -663,8 +691,19 @@ function bindEvents() {
         openRecipeDetail(id);
       }
     } catch (err) {
-      statusEl.textContent = err.message;
+      logApi(`ERROR: ${err.name} - ${err.message}`);
+      console.error('[Reel Extraction Error]', err);
+      statusEl.innerHTML = `<span style="color: #b42318; font-weight: 600;">Failed: ${escapeHtml(err.message)}</span>`;
+      // Open debug box and fallback immediately so user can inspect and paste caption
+      if (debugBox) debugBox.hidden = false;
+      $('reel-fallback-box').hidden = false;
+      $('fallback-caption-text').dataset.sourceUrl = url;
       showToast(err.message, true);
+    } finally {
+      if (extractBtn) {
+        extractBtn.disabled = false;
+        extractBtn.textContent = 'Extract Recipe from Reel';
+      }
     }
   });
 
@@ -826,20 +865,8 @@ function bindEvents() {
 function init() {
   bindEvents();
   const cfg = getAppConfig();
-  $('settings-api-url').value = cfg.apiUrl;
-
-  const setupFbInput = $('setup-firebase-json');
-  if (setupFbInput && !setupFbInput.value.trim()) {
-    setupFbInput.value = JSON.stringify(DEFAULT_FIREBASE_CONFIG, null, 2);
-  }
-  const setupApiInput = $('setup-api-url');
-  if (setupApiInput && !setupApiInput.value.trim()) {
-    setupApiInput.value = DEFAULT_API_URL;
-  }
-
-  if (!isFirebaseConfigured(cfg)) {
-    switchTopLevelScreen('setup-screen');
-    return;
+  if ($('settings-api-url')) {
+    $('settings-api-url').value = cfg.apiUrl;
   }
 
   try {
@@ -852,7 +879,11 @@ function init() {
       $('user-label').textContent = user.email || user.displayName || 'Signed in';
       switchTopLevelScreen('app-shell');
       switchView('library');
-      await Promise.all([refreshLibrary(), refreshShoppingList()]);
+      try {
+        await Promise.all([refreshLibrary(), refreshShoppingList()]);
+      } catch (dbErr) {
+        console.error('Failed loading library/shopping list:', dbErr);
+      }
     });
   } catch (err) {
     console.error('Failed to initialize Firebase Auth:', err);

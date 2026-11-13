@@ -2,6 +2,7 @@
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .auth import verify_firebase_token
 from .config import Settings, load_settings
@@ -57,6 +58,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     def health_check() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(_request, exc: Exception):
+        import traceback
+        tb = traceback.format_exc()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": f"{type(exc).__name__}: {exc}",
+                "type": type(exc).__name__,
+                "traceback": tb,
+            },
+        )
 
     @app.post("/api/extract-reel", response_model=ExtractReelResponse)
     def extract_reel_endpoint(

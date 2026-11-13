@@ -4,32 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Recipe Manager</title>
-  <link rel="stylesheet" href="css/styles.css?v=2" />
+  <link rel="stylesheet" href="css/styles.css?v=4" />
 </head>
 <body>
   <div id="toast" class="toast" hidden></div>
-
-  <!-- First-run Setup Wizard (shown only if Firebase config is not yet set) -->
-  <main id="setup-screen" class="centered-card" hidden>
-    <section class="panel">
-      <h1>Recipe Manager Setup</h1>
-      <p class="muted">
-        Paste your Firebase Web App config JSON (from Firebase Console → Project Settings) and your Render extraction API URL.
-        To preconfigure every device automatically, copy these values into <code>frontend/js/config.js</code>.
-      </p>
-      <form id="setup-form" class="stack">
-        <label>
-          Firebase Config JSON
-          <textarea id="setup-firebase-json" rows="7" required placeholder='{"apiKey":"...","authDomain":"...","projectId":"...","appId":"..."}'></textarea>
-        </label>
-        <label>
-          Render Backend URL (optional now, required for Reel/OneNote extraction)
-          <input id="setup-api-url" type="url" placeholder="https://recipe-manager-api.onrender.com" />
-        </label>
-        <button type="submit" class="btn-primary">Save &amp; Continue</button>
-      </form>
-    </section>
-  </main>
 
   <!-- Sign-In Screen -->
   <main id="auth-screen" class="centered-card" hidden>
@@ -189,12 +167,22 @@
                 Facebook or Instagram Reel URL
                 <input id="single-reel-url" type="url" required placeholder="https://www.instagram.com/reel/..." />
               </label>
-              <button type="submit" class="btn-primary">Extract Recipe from Reel</button>
+              <div class="row">
+                <button type="submit" id="extract-reel-btn" class="btn-primary">Extract Recipe from Reel</button>
+                <button type="button" id="toggle-debug-btn" class="btn-ghost btn-sm">Diagnostics / Logs</button>
+              </div>
             </form>
             <p id="single-reel-status" class="muted"></p>
+            <div id="reel-debug-box" class="debug-panel" hidden>
+              <div class="row between">
+                <strong>Diagnostics &amp; Network Log</strong>
+                <button type="button" id="copy-debug-btn" class="btn-ghost btn-sm">Copy Log</button>
+              </div>
+              <pre id="reel-debug-output" class="debug-output">Idle</pre>
+            </div>
             <div id="reel-fallback-box" class="fallback-box" hidden>
-              <p><strong>Manual Caption Fallback:</strong> Paste the Reel caption or spoken notes below and Gemini will structure it.</p>
-              <textarea id="fallback-caption-text" rows="5" placeholder="Paste Reel caption here..."></textarea>
+              <p><strong>Manual Caption Fallback:</strong> If the Reel cannot be accessed automatically (e.g. login-walled by Meta), paste the caption or text below and Gemini will structure it into a complete recipe.</p>
+              <textarea id="fallback-caption-text" rows="5" placeholder="Paste Reel caption or recipe text here..."></textarea>
               <button id="fallback-extract-btn" type="button" class="btn-primary">Parse Pasted Caption</button>
             </div>
           </div>
@@ -279,6 +267,6 @@
     </main>
   </div>
 
-  <script type="module" src="js/app.js?v=3"></script>
+  <script type="module" src="js/app.js?v=4"></script>
 </body>
 </html>

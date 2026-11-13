@@ -2,17 +2,17 @@
  * Import workflows: single Reel URL, Batch/WhatsApp .txt queue, and OneNote bulk files.
  */
 
-import { extractReel, parseOneNoteFile, parseRecipeText, wakeBackend } from './api.js';
-import { saveRecipe } from './recipes.js';
-import { normalizeReelUrl, parseWhatsAppExport } from './whatsapp-parser.js';
+import { extractReel, parseOneNoteFile, parseRecipeText, wakeBackend } from './api.js?v=4';
+import { saveRecipe } from './recipes.js?v=4';
+import { normalizeReelUrl, parseWhatsAppExport } from './whatsapp-parser.js?v=4';
 
 /**
  * Extract a single Reel URL. Returns { status: 'ok', recipe } or { status: 'blocked', message, rawCaption }.
  */
 export async function runSingleReelExtraction(url, extraContext = '', onStatus = null) {
   await wakeBackend(onStatus);
-  if (onStatus) onStatus('Downloading Reel and extracting recipe via Gemini...');
-  const result = await extractReel(url, extraContext);
+  if (onStatus) onStatus('Downloading Reel via yt-dlp & extracting with Gemini (takes 15-40s)...');
+  const result = await extractReel(url, extraContext, onStatus);
   if (result.status === 'blocked_fallback_required') {
     return {
       status: 'blocked',
