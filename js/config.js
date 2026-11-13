@@ -31,8 +31,12 @@ export function getAppConfig() {
   }
 
   const firebase = {
-    ...DEFAULT_FIREBASE_CONFIG,
-    ...(saved?.firebase || {}),
+    apiKey: saved?.firebase?.apiKey || DEFAULT_FIREBASE_CONFIG.apiKey,
+    authDomain: saved?.firebase?.authDomain || DEFAULT_FIREBASE_CONFIG.authDomain,
+    projectId: saved?.firebase?.projectId || DEFAULT_FIREBASE_CONFIG.projectId,
+    storageBucket: saved?.firebase?.storageBucket || DEFAULT_FIREBASE_CONFIG.storageBucket,
+    messagingSenderId: saved?.firebase?.messagingSenderId || DEFAULT_FIREBASE_CONFIG.messagingSenderId,
+    appId: saved?.firebase?.appId || DEFAULT_FIREBASE_CONFIG.appId,
   };
   const apiUrl = String(saved?.apiUrl || DEFAULT_API_URL || '').replace(/\/+$/, '');
   return { firebase, apiUrl };
