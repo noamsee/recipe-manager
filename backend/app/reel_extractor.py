@@ -66,12 +66,50 @@ def _is_blocked_error(exc_text: str) -> bool:
     return any(marker in lowered for marker in _BLOCKED_INDICATORS)
 
 
+_RECIPE_INDICATORS = (
+    "ingredient",
+    "procedure",
+    "instruction",
+    "recipe",
+    "cup",
+    "tbsp",
+    "tsp",
+    "bake",
+    "blend",
+    "cook",
+    "מצרכים",
+    "אופן",
+    "הכנה",
+    "כוס",
+    "כף",
+    "כפיות",
+    "גרם",
+    "לתנור",
+    "דקות",
+    "מעלות",
+)
+
+
+def _caption_has_recipe_content(caption: str) -> bool:
+    """Check if the caption contains enough text or culinary markers to extract without video."""
+    if len(caption) >= 100:
+        return True
+    lowered = caption.lower()
+    return any(word in lowered for word in _RECIPE_INDICATORS)
+
+
 def _fetch_thumbnail_data_uri(thumbnail_url: str | None) -> str | None:
     """Fetch remote thumbnail into a data URI so expiring Meta CDN links do not break later."""
     if not thumbnail_url:
         return None
     try:
-        resp = requests.get(thumbnail_url, timeout=8)
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+        }
+        resp = requests.get(thumbnail_url, headers=headers, timeout=6)
         if resp.status_code == 200 and len(resp.content) <= 500_000:
             content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
             if content_type.startswith("image/"):
@@ -98,9 +136,59 @@ def extract_reel_recipe(
     extra_context: str = "",
     max_filesize_mb: int = 25,
 ) -> ExtractedRecipe:
-    """Download a Reel with yt-dlp and extract a structured recipe via Gemini."""
+    """Extract a structured recipe from a Reel, prioritizing fast metadata/caption extraction."""
     validated_url = validate_reel_url(url)
 
+    # 1. Fast metadata-first extraction (avoids downloading huge video when caption has the recipe)
+    fast_opts = {
+        "skip_download": True,
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 15,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ),
+        },
+    }
+
+    try:
+        with yt_dlp.YoutubeDL(fast_opts) as ydl:
+            info = ydl.extract_info(validated_url, download=False)
+    except Exception as exc:
+        err_msg = str(exc)
+        if _is_blocked_error(err_msg):
+            raise ExtractionBlockedError(
+                "Instagram/Facebook blocked automatic access to this Reel. "
+                "Please paste the Reel caption or text below to extract the recipe."
+            ) from exc
+        raise ExtractionBlockedError(
+            f"Could not read Reel metadata ({err_msg}). You can paste the caption manually."
+        ) from exc
+
+    if not info:
+        raise ExtractionBlockedError(
+            "No media metadata returned by Instagram/Facebook. Paste the caption manually."
+        )
+
+    caption = (info.get("description") or info.get("title") or "").strip()
+    thumbnail_data_uri = _fetch_thumbnail_data_uri(info.get("thumbnail"))
+
+    # If the caption has recipe content, extract directly in seconds without heavy video download!
+    if caption and _caption_has_recipe_content(caption):
+        recipe = gemini.extract_from_text(
+            text=caption,
+            source_url=validated_url,
+            extra_context=extra_context,
+        )
+        recipe.sourceUrl = validated_url
+        if thumbnail_data_uri and not recipe.thumbnailUrl:
+            recipe.thumbnailUrl = thumbnail_data_uri
+        return recipe
+
+    # 2. If caption was minimal, download video/audio stream with conservative limits
     with tempfile.TemporaryDirectory(prefix="reel_") as tmp_dir:
         tmp_path = Path(tmp_dir)
         ydl_opts = {
@@ -108,10 +196,10 @@ def extract_reel_recipe(
             "noplaylist": True,
             "quiet": True,
             "no_warnings": True,
-            "max_filesize": max_filesize_mb * 1024 * 1024,
-            "format": "mp4/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best",
+            "max_filesize": min(max_filesize_mb, 15) * 1024 * 1024,
+            "format": "mp4/best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best",
             "merge_output_format": "mp4",
-            "socket_timeout": 15,
+            "socket_timeout": 20,
         }
 
         try:
@@ -121,23 +209,16 @@ def extract_reel_recipe(
             err_msg = str(exc)
             if _is_blocked_error(err_msg):
                 raise ExtractionBlockedError(
-                    "Instagram/Facebook blocked automatic access to this Reel. "
-                    "Please paste the Reel caption or text below to extract the recipe."
+                    "Instagram/Facebook blocked video download for this Reel. "
+                    "Please paste the caption or text manually.",
+                    raw_caption=caption,
                 ) from exc
             raise ExtractionBlockedError(
-                f"Could not download Reel automatically ({err_msg}). "
-                "You can paste the Reel caption/text manually."
+                f"Could not download Reel video ({err_msg}). Paste the recipe manually.",
+                raw_caption=caption,
             ) from exc
 
-        if not info:
-            raise ExtractionBlockedError(
-                "No media metadata returned by Instagram/Facebook. Paste the caption manually."
-            )
-
-        caption = (info.get("description") or info.get("title") or "").strip()
-        thumbnail_data_uri = _fetch_thumbnail_data_uri(info.get("thumbnail"))
         media_file = _find_downloaded_media(tmp_path)
-
         if media_file and media_file.stat().st_size > 0:
             recipe = gemini.extract_from_media_and_caption(
                 media_path=media_file,
@@ -153,7 +234,7 @@ def extract_reel_recipe(
             )
         else:
             raise ExtractionBlockedError(
-                "Reel downloaded without usable media or caption text. Paste the recipe text manually.",
+                "Reel has no caption or usable media. Paste the recipe text manually.",
                 raw_caption=caption,
             )
 
