@@ -3,6 +3,14 @@
 import math
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+from bidi.algorithm import get_display
+
+def fix_hebrew(text: str) -> str:
+    """Properly shape bidirectional Hebrew text for Pillow rendering."""
+    try:
+        return get_display(text)
+    except Exception:
+        return text
 
 ASSETS_DIR = Path("assets")
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
@@ -188,7 +196,7 @@ def create_open_graph_image(w: int = 1200, h: int = 630) -> Image.Image:
 
     # Subtitle
     draw.text((text_x, icon_y + 115), "Your bilingual kitchen library", fill=DARK_SLATE, font=subtitle_font)
-    draw.text((text_x, icon_y + 160), "ספר המתכונים הדו-לשוני שלך", fill=MUTED_SLATE, font=subtitle_font)
+    draw.text((text_x, icon_y + 165), fix_hebrew("ספר המתכונים הדו-לשוני שלך"), fill=MUTED_SLATE, font=subtitle_font)
 
     # Feature Pills
     features = [
@@ -196,14 +204,20 @@ def create_open_graph_image(w: int = 1200, h: int = 630) -> Image.Image:
         "OneNote & WhatsApp Batch",
         "Cook Mode",
         "Shopping List",
-        "עברית & English",
+        fix_hebrew("English & עברית"),
     ]
 
     pill_y = icon_y + 230
     curr_x = text_x
     for feat in features:
-        # Approximate width
-        pill_w = len(feat) * 12 + 28
+        # Measure text width using font bounding box
+        try:
+            bbox = pill_font.getbbox(feat)
+            text_w = bbox[2] - bbox[0]
+            pill_w = text_w + 28
+        except Exception:
+            pill_w = len(feat) * 12 + 28
+
         if curr_x + pill_w > w - 40:
             curr_x = text_x
             pill_y += 48
