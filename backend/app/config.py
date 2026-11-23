@@ -20,9 +20,9 @@ def load_settings() -> Settings:
     """Build Settings from the current process environment."""
     raw_origins = os.getenv("ALLOWED_ORIGINS", "https://noamsee.github.io")
     origins = [origin.strip().rstrip("/") for origin in raw_origins.split(",") if origin.strip()]
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
-    if not model or "3.8" in model or "2.0" in model or "1.5" in model:
-        model = "gemini-2.5-flash"
+    model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
+    if not model or any(dep in model for dep in ["3.8", "2.5", "2.0", "1.5"]):
+        model = "gemini-3.5-flash"
     return Settings(
         gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip(),
         firebase_project_id=os.getenv("FIREBASE_PROJECT_ID", "").strip(),

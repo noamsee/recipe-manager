@@ -36,37 +36,33 @@ Rules:
 
 
 VALID_MODELS = (
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.6-flash",
     "gemini-3.1-flash-lite",
-    "gemini-2.5-pro",
+    "gemini-3.1-pro-preview",
 )
 
 FALLBACK_MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.6-flash",
     "gemini-3.1-flash-lite",
-    "gemini-2.5-pro",
+    "gemini-3.1-pro-preview",
 ]
 
 
 class GeminiRecipeService:
     """Thin wrapper over google-genai for structured recipe operations with multi-model fallback."""
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-3.5-flash") -> None:
         if not api_key:
             raise ValueError("GEMINI_API_KEY is not configured.")
         self._client = genai.Client(api_key=api_key)
-        self._model = model if model in VALID_MODELS else "gemini-2.5-flash"
+        self._model = model if model in VALID_MODELS else "gemini-3.5-flash"
 
     def _generate_structured(self, contents: list | str, schema: type[TModel]) -> TModel:
-        initial_model = self._model if self._model in VALID_MODELS else "gemini-2.5-flash"
+        initial_model = self._model if self._model in VALID_MODELS else "gemini-3.5-flash"
         models_to_try = [initial_model] + [m for m in FALLBACK_MODELS if m != initial_model]
         last_error = None
         attempt_log: list[str] = []
@@ -92,9 +88,9 @@ class GeminiRecipeService:
                     last_error = exc
                     err_str = str(exc)
                     attempt_log.append(f"{model_name}[att {attempt + 1}]: {err_str[:120]}")
-                    # If 503, 429, or UNAVAILABLE temporary spike, wait 1.0s before retry
+                    # If 503, 429, or UNAVAILABLE temporary spike, wait 1.5s before retry
                     if "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str or "ResourceExhausted" in err_str:
-                        time.sleep(1.0)
+                        time.sleep(1.5)
                         continue
                     # For other errors (e.g. 404, invalid argument), move to next fallback model
                     break

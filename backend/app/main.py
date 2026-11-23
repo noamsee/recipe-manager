@@ -102,33 +102,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "ytDlpVersion": yt_dlp.version.__version__,
         }
 
-    @app.get("/api/test-gemini")
-    def test_gemini_endpoint(
-        cfg: Settings = Depends(get_settings),
-        gemini: GeminiRecipeService = Depends(get_gemini),
-    ) -> dict:
-        try:
-            test_text = (
-                "Quick Bagel: Mix 1 cup Greek yogurt, 1 cup self-rising flour. "
-                "Shape into bagels, brush with egg, bake at 190C for 22 minutes."
-            )
-            recipe = gemini.extract_from_text(test_text)
-            return {
-                "status": "ok",
-                "configuredModel": cfg.gemini_model,
-                "title": recipe.title,
-                "language": recipe.language,
-                "ingredients": [f"{i.amount} {i.unit} {i.name}".strip() for i in recipe.ingredients],
-                "steps": recipe.steps,
-            }
-        except Exception as exc:
-            import traceback
-            return {
-                "status": "error",
-                "configuredModel": cfg.gemini_model,
-                "error": str(exc),
-                "traceback": traceback.format_exc(),
-            }
+    @app.get("/api/test-models")
+    def test_models_endpoint(cfg: Settings = Depends(get_settings)) -> dict:
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=cfg.gemini_api_key)
+        candidates = [
+            "gemini-3.5-flash",
+            "gemini-3.5-flash-lite",
+            "gemini-3.6-flash",
+            "gemini-3.1-flash-lite",
+            "gemini-3.1-pro-preview",
+        ]
+        results = {}
+        for m in candidates:
+            try:
+                resp = client.models.generate_content(
+                    model=m,
+                    contents="Say 'OK' in JSON format: {\"status\": \"OK\"}",
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.1,
+                    ),
+                )
+                results[m] = {"status": "ok", "text": resp.text[:100]}
+            except Exception as e:
+                results[m] = {"status": "error", "error": str(e)[:200]}
+        return results
 
     @app.exception_handler(HTTPException)
     async def custom_http_exception_handler(_request, exc: HTTPException):
