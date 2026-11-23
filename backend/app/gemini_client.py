@@ -36,39 +36,43 @@ Rules:
 
 
 VALID_MODELS = (
-    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.6-flash",
     "gemini-3.1-flash-lite",
-    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemma-4-26b-a4b-it",
+    "gemma-4-31b-it",
 )
 
 FALLBACK_MODELS = [
-    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
-    "gemini-3.6-flash",
     "gemini-3.1-flash-lite",
-    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemma-4-26b-a4b-it",
+    "gemma-4-31b-it",
 ]
 
 
 class GeminiRecipeService:
     """Thin wrapper over google-genai for structured recipe operations with multi-model fallback."""
 
-    def __init__(self, api_key: str, model: str = "gemini-3.5-flash") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-3.5-flash-lite") -> None:
         if not api_key:
             raise ValueError("GEMINI_API_KEY is not configured.")
         self._client = genai.Client(api_key=api_key)
-        self._model = model if model in VALID_MODELS else "gemini-3.5-flash"
+        self._model = model if model in VALID_MODELS else "gemini-3.5-flash-lite"
 
     def _generate_structured(self, contents: list | str, schema: type[TModel]) -> TModel:
-        initial_model = self._model if self._model in VALID_MODELS else "gemini-3.5-flash"
+        initial_model = self._model if self._model in VALID_MODELS else "gemini-3.5-flash-lite"
         models_to_try = [initial_model] + [m for m in FALLBACK_MODELS if m != initial_model]
         last_error = None
         attempt_log: list[str] = []
 
         for model_name in models_to_try:
-            for attempt in range(2):
+            # For 503 (temporary demand spike), allow up to 3 attempts with backoff.
+            # For 429 (quota exhaustion), break immediately to the next model.
+            for attempt in range(3):
                 try:
                     response = self._client.models.generate_content(
                         model=model_name,
@@ -88,10 +92,16 @@ class GeminiRecipeService:
                     last_error = exc
                     err_str = str(exc)
                     attempt_log.append(f"{model_name}[att {attempt + 1}]: {err_str[:120]}")
-                    # If 503, 429, or UNAVAILABLE temporary spike, wait 1.5s before retry
-                    if "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str or "ResourceExhausted" in err_str:
-                        time.sleep(1.5)
+                    
+                    # If quota exhausted (429), break immediately to next model; retrying will just fail again
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+                        break
+
+                    # If 503 or UNAVAILABLE temporary spike, back off and retry
+                    if "503" in err_str or "UNAVAILABLE" in err_str:
+                        time.sleep(2.0 + attempt * 1.5)
                         continue
+
                     # For other errors (e.g. 404, invalid argument), move to next fallback model
                     break
 

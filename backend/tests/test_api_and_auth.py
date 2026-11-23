@@ -42,7 +42,7 @@ def _test_settings() -> Settings:
     return Settings(
         gemini_api_key="test-key",
         firebase_project_id="test-project",
-        gemini_model="gemini-3.5-flash",
+        gemini_model="gemini-3.5-flash-lite",
         allowed_origins=["https://noamsee.github.io"],
         allow_unauthenticated_local=False,
     )

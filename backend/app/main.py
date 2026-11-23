@@ -103,17 +103,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.get("/api/test-models")
-    def test_models_endpoint(cfg: Settings = Depends(get_settings)) -> dict:
+    def test_models_endpoint(
+        cfg: Settings = Depends(get_settings),
+        gemini: GeminiRecipeService = Depends(get_gemini),
+    ) -> dict:
         from google import genai
         from google.genai import types
 
         client = genai.Client(api_key=cfg.gemini_api_key)
         candidates = [
-            "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
-            "gemini-3.6-flash",
             "gemini-3.1-flash-lite",
-            "gemini-3.1-pro-preview",
+            "gemini-3.5-flash",
+            "gemini-3.6-flash",
+            "gemma-4-26b-a4b-it",
+            "gemma-4-31b-it",
+            "gemini-omni-flash-preview",
         ]
         results = {}
         for m in candidates:
@@ -129,7 +134,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 results[m] = {"status": "ok", "text": resp.text[:100]}
             except Exception as e:
                 results[m] = {"status": "error", "error": str(e)[:200]}
-        return results
+
+        # Also test structured recipe extraction with the configured service
+        structured_test = {}
+        try:
+            r = gemini.extract_from_text("Salad: 1 cucumber, 2 tomatoes, olive oil, salt. Chop and mix.")
+            structured_test = {"status": "ok", "title": r.title, "ingredientsCount": len(r.ingredients)}
+        except Exception as e:
+            structured_test = {"status": "error", "error": str(e)[:300]}
+
+        return {
+            "configuredModel": cfg.gemini_model,
+            "structuredTest": structured_test,
+            "models": results,
+        }
 
     @app.exception_handler(HTTPException)
     async def custom_http_exception_handler(_request, exc: HTTPException):
