@@ -35,11 +35,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=resolved_settings.allowed_origins,
-        allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+        allow_origins=["*"],
         allow_credentials=False,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     def get_settings() -> Settings:
@@ -58,6 +57,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/health")
     def health_check() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/diag")
+    def diag_endpoint(cfg: Settings = Depends(get_settings)) -> dict:
+        import requests
+        import yt_dlp
+
+        google_certs_ok = False
+        try:
+            r = requests.get(
+                "https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com",
+                timeout=5,
+            )
+            google_certs_ok = r.status_code == 200
+        except Exception:
+            google_certs_ok = False
+
+        gemini_ping_ok = False
+        gemini_error = ""
+        if cfg.gemini_api_key:
+            try:
+                svc = GeminiRecipeService(api_key=cfg.gemini_api_key, model=cfg.gemini_model)
+                test_recipe = svc.extract_from_text("2 eggs and 1 tbsp butter, scramble in a pan")
+                gemini_ping_ok = bool(test_recipe and test_recipe.title)
+            except Exception as e:
+                gemini_error = f"{type(e).__name__}: {e}"
+
+        return {
+            "status": "ok",
+            "firebaseProjectIdConfigured": bool(cfg.firebase_project_id),
+            "firebaseProjectId": cfg.firebase_project_id,
+            "geminiApiKeyConfigured": bool(cfg.gemini_api_key),
+            "geminiModel": cfg.gemini_model,
+            "googleCertsReachable": google_certs_ok,
+            "geminiPingOk": gemini_ping_ok,
+            "geminiError": gemini_error,
+            "ytDlpVersion": yt_dlp.version.__version__,
+        }
 
     @app.exception_handler(Exception)
     async def global_exception_handler(_request, exc: Exception):
