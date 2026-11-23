@@ -452,10 +452,21 @@ button {
   font-size: 0.82rem;
   padding: 0.75rem;
   border-radius: 8px;
-  max-height: 240px;
+  max-height: 280px;
   overflow-y: auto;
   white-space: pre-wrap;
 }
+
+.batch-log-item {
+  padding: 0.25rem 0;
+  line-height: 1.45;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.log-success { color: #86efac; }
+.log-skipped { color: #93c5fd; }
+.log-warning { color: #fde047; }
+.log-error { color: #fca5a5; }
 
 .dietary-box {
   border: 1px solid var(--border);

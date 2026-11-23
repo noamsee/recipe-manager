@@ -759,42 +759,104 @@ function bindEvents() {
       urlsText: $('batch-urls-input').value,
       whatsappText: text,
       existingRecipes: state.recipes,
+      includeAlreadySaved: true,
     });
     $('batch-urls-input').value = items.map((i) => i.url).join('\n');
     $('batch-summary').textContent =
-      `Found ${items.length} new Reel link(s) (${alreadySavedCount} already saved, ${duplicateCount} duplicates skipped).`;
+      `Found ${items.length} Reel link(s) (${alreadySavedCount} already saved in library, ${duplicateCount} duplicate links in file).`;
     $('batch-urls-input').dataset.whatsappText = text;
+    $('batch-retry-failed-btn').hidden = true;
   });
 
-  $('batch-run-btn').addEventListener('click', async () => {
+  const runBatchImport = async (targetItems = null) => {
     const whatsappText = $('batch-urls-input').dataset.whatsappText || '';
-    const { items } = buildBatchQueue({
+    const queue = targetItems || buildBatchQueue({
       urlsText: $('batch-urls-input').value,
       whatsappText,
       existingRecipes: state.recipes,
-    });
-    if (!items.length) {
-      return showToast('No new Facebook or Instagram Reel URLs to process.', true);
+      includeAlreadySaved: true,
+    }).items;
+
+    if (!queue.length) {
+      return showToast('No Reel URLs to process in queue.', true);
     }
 
     const log = $('batch-log');
+    log.hidden = false;
     log.innerHTML = '';
     $('batch-run-btn').disabled = true;
+    $('batch-retry-failed-btn').hidden = true;
+
     try {
-      const summary = await processBatchQueue(state.user.uid, items, (evt) => {
+      const summary = await processBatchQueue(state.user.uid, queue, (evt) => {
         const line = document.createElement('div');
-        if (evt.type === 'wake') line.textContent = evt.message;
-        else if (evt.type === 'item_start')
+        line.className = 'batch-log-item';
+        if (evt.type === 'wake') {
+          line.textContent = `[Server] ${evt.message}`;
+          line.classList.add('muted');
+        } else if (evt.type === 'item_start') {
           line.textContent = `[${evt.index + 1}/${evt.total}] Processing ${evt.url}...`;
-        else if (evt.type === 'item_done')
-          line.textContent = `  -> ${evt.status.toUpperCase()}: ${evt.title || evt.message || evt.url}`;
+        } else if (evt.type === 'item_done') {
+          if (evt.status === 'saved') {
+            line.innerHTML = `✅ [${evt.index + 1}/${evt.total}] <strong>SAVED:</strong> "${escapeHtml(evt.title)}" <span class="muted">(${escapeHtml(evt.url)})</span>`;
+            line.classList.add('log-success');
+          } else if (evt.status === 'skipped') {
+            line.innerHTML = `⏩ [${evt.index + 1}/${evt.total}] <strong>SKIPPED:</strong> Recipe already exists ("${escapeHtml(evt.title)}") <span class="muted">(${escapeHtml(evt.url)})</span>`;
+            line.classList.add('log-skipped');
+          } else if (evt.status === 'blocked') {
+            line.innerHTML = `⚠️ [${evt.index + 1}/${evt.total}] <strong>BLOCKED:</strong> ${escapeHtml(evt.message)} <span class="muted">(${escapeHtml(evt.url)})</span>`;
+            line.classList.add('log-warning');
+          } else if (evt.status === 'failed') {
+            line.innerHTML = `❌ [${evt.index + 1}/${evt.total}] <strong>FAILED:</strong> ${escapeHtml(evt.message)} <span class="muted">(${escapeHtml(evt.url)})</span>`;
+            line.classList.add('log-error');
+          }
+        }
         log.appendChild(line);
-      });
+        log.scrollTop = log.scrollHeight;
+      }, state.recipes);
+
       await refreshLibrary();
-      showToast(`Batch finished: ${summary.saved} saved, ${summary.blocked.length} blocked, ${summary.failed.length} failed.`);
+
+      const summaryMsg = `Batch complete: ${summary.saved} saved, ${summary.skipped} skipped (already existed), ${summary.blocked.length} blocked, ${summary.failed.length} failed.`;
+      showToast(summaryMsg);
+
+      const summaryLine = document.createElement('div');
+      summaryLine.className = 'batch-log-item';
+      summaryLine.style.marginTop = '0.5rem';
+      summaryLine.style.fontWeight = '600';
+      summaryLine.textContent = `--- Finished: ${summary.saved} newly saved, ${summary.skipped} already existed, ${summary.blocked.length} blocked, ${summary.failed.length} failed ---`;
+      log.appendChild(summaryLine);
+
+      const retryableItems = [...summary.blocked, ...summary.failed];
+      if (retryableItems.length > 0) {
+        state.lastBatchRetryableItems = retryableItems;
+        const retryBtn = $('batch-retry-failed-btn');
+        retryBtn.textContent = `Retry Failed / Blocked Only (${retryableItems.length})`;
+        retryBtn.hidden = false;
+      }
     } finally {
       $('batch-run-btn').disabled = false;
     }
+  };
+
+  $('batch-run-btn').addEventListener('click', () => runBatchImport());
+
+  $('batch-retry-failed-btn').addEventListener('click', () => {
+    if (state.lastBatchRetryableItems?.length) {
+      $('batch-urls-input').value = state.lastBatchRetryableItems.map((i) => i.url).join('\n');
+      $('batch-urls-input').dataset.whatsappText = '';
+      runBatchImport(state.lastBatchRetryableItems);
+    }
+  });
+
+  $('batch-clear-btn').addEventListener('click', () => {
+    $('batch-urls-input').value = '';
+    $('batch-urls-input').dataset.whatsappText = '';
+    $('batch-summary').textContent = '';
+    $('batch-log').innerHTML = '';
+    $('batch-log').hidden = true;
+    $('batch-retry-failed-btn').hidden = true;
+    $('whatsapp-file-input').value = '';
   });
 
   // OneNote importer

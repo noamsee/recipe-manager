@@ -16,13 +16,40 @@ const WHATSAPP_LINE_PREFIX_RE =
  * @returns {string}
  */
 export function normalizeReelUrl(rawUrl) {
-  const trimmed = rawUrl.replace(/[),.;!?'"\]]+$/g, '').trim();
+  if (!rawUrl) return '';
+  const trimmed = String(rawUrl).replace(/[),.;!?'"\]]+$/g, '').trim();
   try {
     const parsed = new URL(trimmed);
-    const paramsToDrop = ['igsh', 'igshid', 'fbclid', 'utm_source', 'utm_medium', 'utm_campaign'];
-    for (const key of paramsToDrop) {
-      parsed.searchParams.delete(key);
+    let host = parsed.hostname.toLowerCase();
+    if (host.startsWith('m.')) host = 'www.' + host.slice(2);
+    if (!host.startsWith('www.') && (host === 'instagram.com' || host === 'facebook.com')) {
+      host = 'www.' + host;
     }
+    parsed.hostname = host;
+
+    // For Instagram and Facebook reels, query params are tracking or session tokens
+    // (igsh, igshid, stkn, mibextid, fbclid, utm_*, ref, s, etc.)
+    if (
+      host.includes('instagram.com') ||
+      host.includes('facebook.com') ||
+      host.includes('fb.watch')
+    ) {
+      parsed.search = '';
+      parsed.hash = '';
+    } else {
+      const paramsToDrop = ['igsh', 'igshid', 'fbclid', 'utm_source', 'utm_medium', 'utm_campaign', 'mibextid', 'stkn'];
+      for (const key of paramsToDrop) {
+        parsed.searchParams.delete(key);
+      }
+    }
+
+    // Ensure consistent trailing slash on path
+    let pathname = parsed.pathname;
+    if (!pathname.endsWith('/')) {
+      pathname += '/';
+    }
+    parsed.pathname = pathname;
+
     return parsed.toString();
   } catch {
     return trimmed;
@@ -73,4 +100,73 @@ export function parseWhatsAppExport(rawText, existingUrls = new Set()) {
   }
 
   return { items, duplicateCount, alreadySavedCount };
+}
+
+/**
+ * Build a batch queue from pasted URLs and/or a WhatsApp Export Chat .txt string.
+ * Tags items that already exist in the user's recipe library so the batch runner
+ * skips them, prevents overwriting, and logs the existing recipe name.
+ */
+export function buildBatchQueue({
+  urlsText = '',
+  whatsappText = '',
+  existingRecipes = [],
+  includeAlreadySaved = true,
+}) {
+  const existingMap = new Map();
+  for (const r of existingRecipes) {
+    if (r.sourceUrl) {
+      existingMap.set(normalizeReelUrl(r.sourceUrl), r);
+    }
+  }
+
+  const items = [];
+  const seen = new Set();
+  let duplicateCount = 0;
+  let alreadySavedCount = 0;
+
+  if (whatsappText.trim()) {
+    const preFilter = includeAlreadySaved ? new Set() : new Set(existingMap.keys());
+    const parsed = parseWhatsAppExport(whatsappText, preFilter);
+    duplicateCount += parsed.duplicateCount;
+
+    for (const item of parsed.items) {
+      const norm = normalizeReelUrl(item.url);
+      if (!seen.has(norm)) {
+        seen.add(norm);
+        const existing = existingMap.get(norm);
+        if (existing) {
+          alreadySavedCount += 1;
+          if (includeAlreadySaved) {
+            items.push({ ...item, url: norm, existingRecipe: existing });
+          }
+        } else {
+          items.push({ ...item, url: norm, existingRecipe: null });
+        }
+      }
+    }
+  }
+
+  for (const rawLine of urlsText.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    if (!trimmed) continue;
+    const norm = normalizeReelUrl(trimmed);
+    if (seen.has(norm)) {
+      duplicateCount += 1;
+      continue;
+    }
+    seen.add(norm);
+
+    const existing = existingMap.get(norm);
+    if (existing) {
+      alreadySavedCount += 1;
+      if (includeAlreadySaved) {
+        items.push({ url: norm, context: '', existingRecipe: existing });
+      }
+    } else {
+      items.push({ url: norm, context: '', existingRecipe: null });
+    }
+  }
+
+  return { items, duplicateCount, alreadySavedCount, totalFound: items.length };
 }

@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeReelUrl, parseWhatsAppExport } from '../js/whatsapp-parser.js';
+import { buildBatchQueue, normalizeReelUrl, parseWhatsAppExport } from '../js/whatsapp-parser.js';
 
-test('normalizeReelUrl strips tracking query params and trailing punctuation', () => {
-  const cleaned = normalizeReelUrl('https://www.instagram.com/reel/ABC123/?igsh=xyz123,');
-  assert.equal(cleaned, 'https://www.instagram.com/reel/ABC123/');
+test('normalizeReelUrl strips tracking query params, stkn, mibextid, and trailing punctuation', () => {
+  const igCleaned = normalizeReelUrl('https://www.instagram.com/reel/DeFjLpABrfw/?stkn=MTBsNGw2M2h3c3A5ZA==');
+  assert.equal(igCleaned, 'https://www.instagram.com/reel/DeFjLpABrfw/');
+
+  const fbCleaned = normalizeReelUrl('https://m.facebook.com/share/v/1BoViagDae/?mibextid=wwXIfr');
+  assert.equal(fbCleaned, 'https://www.facebook.com/share/v/1BoViagDae/');
 });
 
 test('parseWhatsAppExport extracts Facebook and Instagram links, strips prefixes, and deduplicates', () => {
@@ -27,4 +30,22 @@ test('parseWhatsAppExport extracts Facebook and Instagram links, strips prefixes
   assert.equal(result.items[1].url, 'https://www.facebook.com/share/r/123456/');
   assert.equal(result.items[1].context, 'חובה לנסות');
   assert.equal(result.items[2].url, 'https://fb.watch/coolvideo/');
+});
+
+test('buildBatchQueue identifies already saved recipes to prevent overwrite', () => {
+  const existingRecipes = [
+    { title: 'Puff Pastry Salmon Appetizer', sourceUrl: 'https://www.facebook.com/share/v/1BoViagDae/?mibextid=wwXIfr' },
+    { title: 'Bagel Recipe', sourceUrl: 'https://www.instagram.com/reel/DeFjLpABrfw/' },
+  ];
+
+  const urlsText = [
+    'https://www.facebook.com/share/v/1BoViagDae/', // Already exists
+    'https://www.instagram.com/reel/NEW_RECIPE_123/', // New
+  ].join('\n');
+
+  const queue = buildBatchQueue({ urlsText, existingRecipes, includeAlreadySaved: true });
+  assert.equal(queue.items.length, 2);
+  assert.equal(queue.alreadySavedCount, 1);
+  assert.equal(queue.items[0].existingRecipe?.title, 'Puff Pastry Salmon Appetizer');
+  assert.equal(queue.items[1].existingRecipe, null);
 });

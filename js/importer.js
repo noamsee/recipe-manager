@@ -4,7 +4,9 @@
 
 import { extractReel, parseOneNoteFile, parseRecipeText, wakeBackend } from './api.js?v=4';
 import { saveRecipe } from './recipes.js?v=4';
-import { normalizeReelUrl, parseWhatsAppExport } from './whatsapp-parser.js?v=4';
+import { buildBatchQueue, normalizeReelUrl, parseWhatsAppExport } from './whatsapp-parser.js?v=4';
+
+export { buildBatchQueue, normalizeReelUrl, parseWhatsAppExport };
 
 /**
  * Extract a single Reel URL. Returns { status: 'ok', recipe } or { status: 'blocked', message, rawCaption }.
@@ -34,60 +36,43 @@ export async function runCaptionFallbackExtraction(text, sourceUrl = null, onSta
 }
 
 /**
- * Build a batch queue from pasted URLs and/or a WhatsApp Export Chat .txt string,
- * deduplicating against already saved recipe source URLs.
+ * Process a batch queue sequentially:
+ * - If a recipe already exists in the library, it is skipped and logged to prevent overwrite.
+ * - If a recipe was previously deleted by the user, it is no longer in existingRecipes, so it will be re-imported.
+ * - Newly extracted recipes are saved immediately to Firestore.
  */
-export function buildBatchQueue({ urlsText = '', whatsappText = '', existingRecipes = [] }) {
-  const existingUrls = new Set(
-    existingRecipes.map((r) => r.sourceUrl).filter(Boolean).map((u) => normalizeReelUrl(u))
-  );
-
-  const items = [];
-  const seen = new Set();
-  let duplicateCount = 0;
-  let alreadySavedCount = 0;
-
-  if (whatsappText.trim()) {
-    const parsed = parseWhatsAppExport(whatsappText, existingUrls);
-    duplicateCount += parsed.duplicateCount;
-    alreadySavedCount += parsed.alreadySavedCount;
-    for (const item of parsed.items) {
-      if (!seen.has(item.url)) {
-        seen.add(item.url);
-        items.push(item);
-      }
+export async function processBatchQueue(ownerUid, queueItems, onProgress, existingRecipes = []) {
+  const existingMap = new Map();
+  for (const r of existingRecipes) {
+    if (r.sourceUrl) {
+      existingMap.set(normalizeReelUrl(r.sourceUrl), r);
     }
   }
 
-  for (const rawLine of urlsText.split(/\r?\n/)) {
-    const trimmed = rawLine.trim();
-    if (!trimmed) continue;
-    const normalized = normalizeReelUrl(trimmed);
-    if (existingUrls.has(normalized)) {
-      alreadySavedCount += 1;
-      continue;
-    }
-    if (seen.has(normalized)) {
-      duplicateCount += 1;
-      continue;
-    }
-    seen.add(normalized);
-    items.push({ url: normalized, context: '' });
-  }
-
-  return { items, duplicateCount, alreadySavedCount };
-}
-
-/**
- * Process a batch queue sequentially, saving successful recipes immediately to Firestore
- * and returning per-item statuses (including blocked items that need manual caption paste).
- */
-export async function processBatchQueue(ownerUid, queueItems, onProgress) {
   await wakeBackend((msg) => onProgress?.({ type: 'wake', message: msg }));
-  const summary = { saved: 0, blocked: [], failed: [] };
+  const summary = { saved: 0, skipped: 0, blocked: [], failed: [] };
 
   for (let i = 0; i < queueItems.length; i += 1) {
     const item = queueItems[i];
+    const normUrl = normalizeReelUrl(item.url);
+
+    // 1. Check if recipe ALREADY EXISTS in the user's active library
+    const existing = item.existingRecipe || existingMap.get(normUrl);
+    if (existing) {
+      summary.skipped += 1;
+      onProgress?.({
+        type: 'item_done',
+        index: i,
+        total: queueItems.length,
+        status: 'skipped',
+        url: item.url,
+        title: existing.title || 'Untitled',
+        message: `Recipe already exists ("${existing.title}")`,
+      });
+      continue;
+    }
+
+    // 2. Not in library: extract & save
     onProgress?.({ type: 'item_start', index: i, total: queueItems.length, url: item.url });
 
     try {
@@ -97,6 +82,7 @@ export async function processBatchQueue(ownerUid, queueItems, onProgress) {
         onProgress?.({
           type: 'item_done',
           index: i,
+          total: queueItems.length,
           status: 'blocked',
           url: item.url,
           message: outcome.message,
@@ -104,9 +90,12 @@ export async function processBatchQueue(ownerUid, queueItems, onProgress) {
       } else if (outcome.recipe) {
         await saveRecipe(ownerUid, outcome.recipe);
         summary.saved += 1;
+        // Register in existingMap so any duplicate later in this run is also skipped
+        existingMap.set(normUrl, outcome.recipe);
         onProgress?.({
           type: 'item_done',
           index: i,
+          total: queueItems.length,
           status: 'saved',
           url: item.url,
           title: outcome.recipe.title,
@@ -117,6 +106,7 @@ export async function processBatchQueue(ownerUid, queueItems, onProgress) {
       onProgress?.({
         type: 'item_done',
         index: i,
+        total: queueItems.length,
         status: 'failed',
         url: item.url,
         message: err.message,

@@ -226,8 +226,12 @@
               Queued Facebook / Instagram Reel URLs (one per line)
               <textarea id="batch-urls-input" rows="7" placeholder="https://www.instagram.com/reel/...&#10;https://www.facebook.com/share/r/..."></textarea>
             </label>
-            <button id="batch-run-btn" type="button" class="btn-primary">Process Batch Queue</button>
-            <div id="batch-log" class="batch-log"></div>
+            <div class="row">
+              <button id="batch-run-btn" type="button" class="btn-primary">Process Batch Queue</button>
+              <button id="batch-retry-failed-btn" type="button" class="btn-secondary" hidden>Retry Failed / Blocked Only</button>
+              <button id="batch-clear-btn" type="button" class="btn-ghost btn-sm">Clear</button>
+            </div>
+            <div id="batch-log" class="batch-log" hidden></div>
           </div>
 
           <div id="pane-onenote" class="stack" hidden>
