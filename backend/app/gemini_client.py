@@ -40,8 +40,6 @@ VALID_MODELS = (
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash",
     "gemini-3.6-flash",
-    "gemma-4-26b-a4b-it",
-    "gemma-4-31b-it",
 )
 
 FALLBACK_MODELS = [
@@ -49,8 +47,6 @@ FALLBACK_MODELS = [
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash",
     "gemini-3.6-flash",
-    "gemma-4-26b-a4b-it",
-    "gemma-4-31b-it",
 ]
 
 
@@ -70,9 +66,9 @@ class GeminiRecipeService:
         attempt_log: list[str] = []
 
         for model_name in models_to_try:
-            # For 503 (temporary demand spike), allow up to 3 attempts with backoff.
-            # For 429 (quota exhaustion), break immediately to the next model.
-            for attempt in range(3):
+            # 2 attempts for the primary model, 1 attempt for each fallback
+            max_attempts = 2 if model_name == initial_model else 1
+            for attempt in range(max_attempts):
                 try:
                     response = self._client.models.generate_content(
                         model=model_name,
@@ -91,15 +87,15 @@ class GeminiRecipeService:
                 except Exception as exc:
                     last_error = exc
                     err_str = str(exc)
-                    attempt_log.append(f"{model_name}[att {attempt + 1}]: {err_str[:120]}")
-                    
-                    # If quota exhausted (429), break immediately to next model; retrying will just fail again
+                    attempt_log.append(f"{model_name}[att {attempt + 1}]: {err_str[:100]}")
+
+                    # If quota exhausted (429), break immediately to next model
                     if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
                         break
 
-                    # If 503 or UNAVAILABLE temporary spike, back off and retry
-                    if "503" in err_str or "UNAVAILABLE" in err_str:
-                        time.sleep(2.0 + attempt * 1.5)
+                    # If 503 or UNAVAILABLE spike on primary, sleep 1.5s before attempt 2
+                    if ("503" in err_str or "UNAVAILABLE" in err_str) and attempt + 1 < max_attempts:
+                        time.sleep(1.5)
                         continue
 
                     # For other errors (e.g. 404, invalid argument), move to next fallback model

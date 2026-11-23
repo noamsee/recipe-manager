@@ -661,6 +661,7 @@ function bindEvents() {
     const url = $('single-reel-url').value.trim();
     const statusEl = $('single-reel-status');
     const extractBtn = $('extract-reel-btn');
+    statusEl.innerHTML = '<span class="muted">Starting extraction...</span>';
     $('reel-fallback-box').hidden = true;
     if (extractBtn) {
       extractBtn.disabled = true;
