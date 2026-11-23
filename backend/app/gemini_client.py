@@ -35,11 +35,24 @@ Rules:
 """.strip()
 
 
+VALID_MODELS = (
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-pro",
+)
+
 FALLBACK_MODELS = [
     "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-3.8-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
+    "gemini-3.6-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-pro",
 ]
 
 
@@ -50,11 +63,13 @@ class GeminiRecipeService:
         if not api_key:
             raise ValueError("GEMINI_API_KEY is not configured.")
         self._client = genai.Client(api_key=api_key)
-        self._model = model
+        self._model = model if model in VALID_MODELS else "gemini-2.5-flash"
 
     def _generate_structured(self, contents: list | str, schema: type[TModel]) -> TModel:
-        models_to_try = [self._model] + [m for m in FALLBACK_MODELS if m != self._model]
+        initial_model = self._model if self._model in VALID_MODELS else "gemini-2.5-flash"
+        models_to_try = [initial_model] + [m for m in FALLBACK_MODELS if m != initial_model]
         last_error = None
+        attempt_log: list[str] = []
 
         for model_name in models_to_try:
             for attempt in range(2):
@@ -70,18 +85,24 @@ class GeminiRecipeService:
                     )
                     if getattr(response, "parsed", None) is not None:
                         return response.parsed  # type: ignore[return-value]
-                    return schema.model_validate_json(response.text)
+                    if response.text:
+                        return schema.model_validate_json(response.text)
+                    raise ValueError(f"Model {model_name} returned empty text.")
                 except Exception as exc:
                     last_error = exc
                     err_str = str(exc)
-                    # If 503 or 429 temporary spike, wait 1.5s before retry
-                    if "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str:
-                        time.sleep(1.5)
+                    attempt_log.append(f"{model_name}[att {attempt + 1}]: {err_str[:120]}")
+                    # If 503, 429, or UNAVAILABLE temporary spike, wait 1.0s before retry
+                    if "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str or "ResourceExhausted" in err_str:
+                        time.sleep(1.0)
                         continue
-                    # For other errors, move to next fallback model
+                    # For other errors (e.g. 404, invalid argument), move to next fallback model
                     break
 
-        raise RuntimeError(f"All Gemini models ({', '.join(models_to_try)}) failed. Last error: {last_error}") from last_error
+        raise RuntimeError(
+            f"All Gemini models ({', '.join(models_to_try)}) failed. "
+            f"Details: [{'; '.join(attempt_log)}]. Last error: {last_error}"
+        ) from last_error
 
     def extract_from_text(
         self,

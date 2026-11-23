@@ -102,6 +102,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "ytDlpVersion": yt_dlp.version.__version__,
         }
 
+    @app.get("/api/test-gemini")
+    def test_gemini_endpoint(
+        cfg: Settings = Depends(get_settings),
+        gemini: GeminiRecipeService = Depends(get_gemini),
+    ) -> dict:
+        try:
+            test_text = (
+                "Quick Bagel: Mix 1 cup Greek yogurt, 1 cup self-rising flour. "
+                "Shape into bagels, brush with egg, bake at 190C for 22 minutes."
+            )
+            recipe = gemini.extract_from_text(test_text)
+            return {
+                "status": "ok",
+                "configuredModel": cfg.gemini_model,
+                "title": recipe.title,
+                "language": recipe.language,
+                "ingredients": [f"{i.amount} {i.unit} {i.name}".strip() for i in recipe.ingredients],
+                "steps": recipe.steps,
+            }
+        except Exception as exc:
+            import traceback
+            return {
+                "status": "error",
+                "configuredModel": cfg.gemini_model,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            }
+
     @app.exception_handler(HTTPException)
     async def custom_http_exception_handler(_request, exc: HTTPException):
         return JSONResponse(
