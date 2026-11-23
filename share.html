@@ -4,11 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Shared Recipe — Recipe Manager</title>
+
+  <!-- Favicons for browser tab -->
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="assets/apple-touch-icon.png" />
+  <link rel="shortcut icon" href="favicon.ico" />
+  <meta name="theme-color" content="#C44B2B" />
+
+  <!-- WhatsApp & Social Preview Cards (Open Graph) -->
+  <meta name="description" content="View this shared recipe on Recipe Manager — your bilingual kitchen library with Cook Mode and Shopping List." />
+  <meta property="og:type" content="article" />
+  <meta property="og:site_name" content="Recipe Manager" />
+  <meta property="og:title" content="Shared Recipe — Recipe Manager" />
+  <meta property="og:description" content="View ingredients, directions, and dietary info with Cook Mode (screen wake-lock) on Recipe Manager." />
+  <meta property="og:image" content="https://noamsee.github.io/recipe-manager/assets/og-preview.png" />
+  <meta property="og:image:secure_url" content="https://noamsee.github.io/recipe-manager/assets/og-preview.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+
+  <!-- Twitter / X Card -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Shared Recipe — Recipe Manager" />
+  <meta name="twitter:description" content="View ingredients, directions, and dietary info with Cook Mode on Recipe Manager." />
+  <meta name="twitter:image" content="https://noamsee.github.io/recipe-manager/assets/og-preview.png" />
+
   <link rel="stylesheet" href="css/styles.css?v=4" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">Shared Recipe</div>
+    <div class="brand"><img src="assets/icon.svg" alt="Recipe Manager" class="brand-icon" /> Shared Recipe</div>
     <button id="share-wake-btn" type="button" class="btn-secondary" data-active="false">Keep Screen Awake</button>
   </header>
   <main id="share-root" class="container">

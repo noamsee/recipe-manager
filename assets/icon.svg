@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="terracotta-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#D94826"/>
+      <stop offset="100%" stop-color="#A8381C"/>
+    </linearGradient>
+    <linearGradient id="gold-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FCD34D"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <!-- Rounded Squircle Background -->
+  <rect x="24" y="24" width="464" height="464" rx="104" fill="url(#terracotta-grad)"/>
+  <rect x="24" y="24" width="464" height="464" rx="104" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="4"/>
+
+  <!-- Steam & Aromatic Leaf -->
+  <g fill="none" stroke="rgba(255,255,255,0.85)" stroke-width="14" stroke-linecap="round">
+    <path d="M 210 170 C 190 140, 200 110, 220 90"/>
+    <path d="M 302 170 C 322 140, 312 110, 292 90"/>
+  </g>
+  <!-- Fresh Herb Leaf (Center Steam) -->
+  <path d="M 256 70 Q 280 105 256 140 Q 232 105 256 70 Z" fill="#FFF8F0"/>
+  <line x1="256" y1="80" x2="256" y2="130" stroke="#C44B2B" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- Dutch Oven / Casserole Body -->
+  <g filter="url(#shadow)">
+    <!-- Golden Side Handles -->
+    <path d="M 100 280 C 85 280, 85 320, 100 320" fill="none" stroke="url(#gold-grad)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M 412 280 C 427 280, 427 320, 412 320" fill="none" stroke="url(#gold-grad)" stroke-width="16" stroke-linecap="round"/>
+
+    <!-- Pot Body -->
+    <rect x="116" y="260" width="280" height="135" rx="36" fill="#FFFFFF"/>
+    <!-- Pot Rim -->
+    <line x1="126" y1="272" x2="386" y2="272" stroke="#E5E0DB" stroke-width="4"/>
+
+    <!-- Pot Lid -->
+    <path d="M 120 250 Q 256 185 392 250 Z" fill="#FFFFFF"/>
+    <rect x="114" y="246" width="284" height="14" rx="7" fill="#FFFFFF"/>
+    <!-- Lid Knob -->
+    <circle cx="256" cy="195" r="20" fill="url(#gold-grad)"/>
+
+    <!-- Heart / Culinary Love Accent -->
+    <path d="M 256 312 C 256 302, 240 292, 230 302 C 220 312, 230 324, 256 342 C 282 324, 292 312, 282 302 C 272 292, 256 302, 256 312 Z" fill="#C44B2B"/>
+  </g>
+</svg>
