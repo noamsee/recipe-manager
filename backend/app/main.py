@@ -68,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def diag_endpoint(cfg: Settings = Depends(get_settings)) -> dict:
         import requests
         import yt_dlp
+        from google import genai
 
         google_certs_ok = False
         try:
@@ -79,15 +80,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             google_certs_ok = False
 
-        model_results = {}
+        available_models = []
         if cfg.gemini_api_key:
-            for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.8-flash"]:
-                try:
-                    svc = GeminiRecipeService(api_key=cfg.gemini_api_key, model=m)
-                    test_recipe = svc.extract_from_text("2 eggs and 1 tbsp butter, scramble in a pan")
-                    model_results[m] = "OK" if (test_recipe and test_recipe.title) else "EMPTY"
-                except Exception as e:
-                    model_results[m] = f"{type(e).__name__}: {str(e)[:120]}"
+            try:
+                client = genai.Client(api_key=cfg.gemini_api_key)
+                for m in client.models.list():
+                    name = getattr(m, "name", str(m))
+                    methods = getattr(m, "supported_generation_methods", []) or getattr(m, "supported_actions", [])
+                    available_models.append({"name": name, "methods": methods})
+            except Exception as e:
+                available_models = [{"error": f"{type(e).__name__}: {e}"}]
 
         return {
             "status": "ok",
@@ -96,7 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "geminiApiKeyConfigured": bool(cfg.gemini_api_key),
             "configuredModel": cfg.gemini_model,
             "googleCertsReachable": google_certs_ok,
-            "modelsTested": model_results,
+            "availableModels": available_models[:15],
             "ytDlpVersion": yt_dlp.version.__version__,
         }
 
