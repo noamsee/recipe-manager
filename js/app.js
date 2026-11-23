@@ -2,30 +2,30 @@
  * Main SPA controller for Recipe Manager.
  */
 
-import { logApi, subscribeApiLogs, translateRecipe } from './api.js?v=4';
+import { logApi, subscribeApiLogs, translateRecipe } from './api.js?v=5';
 import {
   DEFAULT_API_URL,
   DEFAULT_FIREBASE_CONFIG,
   getAppConfig,
   isFirebaseConfigured,
   saveAppConfig,
-} from './config.js?v=4';
-import { isWakeLockActive, setWakeLockEnabled } from './cook-mode.js?v=4';
-import { downloadTextFile, recipesToJson, recipesToMarkdown } from './export.js?v=4';
+} from './config.js?v=5';
+import { isWakeLockActive, setWakeLockEnabled } from './cook-mode.js?v=5';
+import { downloadTextFile, recipesToJson, recipesToMarkdown } from './export.js?v=5';
 import {
   logoutUser,
   registerWithEmail,
   signInWithEmail,
   signInWithGoogle,
   subscribeAuth,
-} from './firebase-client.js?v=4';
+} from './firebase-client.js?v=5';
 import {
   buildBatchQueue,
   extractRecipesFromOneNoteFile,
   processBatchQueue,
   runCaptionFallbackExtraction,
   runSingleReelExtraction,
-} from './importer.js?v=4';
+} from './importer.js?v=5';
 import {
   compressImageToDataUri,
   createOrUpdateShareLink,
@@ -33,8 +33,8 @@ import {
   filterRecipes,
   loadUserRecipes,
   saveRecipe,
-} from './recipes.js?v=4';
-import { applyDirection } from './rtl.js?v=4';
+} from './recipes.js?v=5';
+import { applyDirection } from './rtl.js?v=5';
 import {
   addShoppingItems,
   addSingleShoppingItem,
@@ -42,7 +42,7 @@ import {
   loadShoppingList,
   removeShoppingItem,
   toggleShoppingItem,
-} from './shopping-list.js?v=4';
+} from './shopping-list.js?v=5';
 
 const state = {
   user: null,

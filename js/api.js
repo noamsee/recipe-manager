@@ -109,6 +109,15 @@ export async function wakeBackend(onStatus) {
 
       if (response.ok) {
         logApi(`Backend healthy on attempt ${attempt}: HTTP ${response.status}`);
+        try {
+          const diagRes = await fetch(`${baseUrl}/api/diag`, { signal: AbortSignal.timeout(5000) });
+          if (diagRes.ok) {
+            const diag = await diagRes.json();
+            logApi(`Diag info: Gemini=${diag.geminiPingOk ? 'OK' : 'FAIL: ' + (diag.geminiError || 'unknown')}, Firebase=${diag.firebaseProjectId}, GoogleAuthCerts=${diag.googleCertsReachable}`);
+          }
+        } catch {
+          // best effort
+        }
         if (onStatus) onStatus('Extraction server ready.');
         return true;
       }
