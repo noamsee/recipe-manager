@@ -58,6 +58,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health_check() -> dict[str, str]:
         return {"status": "ok"}
 
+    CORS_HEADERS = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*",
+    }
+
     @app.get("/api/diag")
     def diag_endpoint(cfg: Settings = Depends(get_settings)) -> dict:
         import requests
@@ -73,27 +79,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             google_certs_ok = False
 
-        gemini_ping_ok = False
-        gemini_error = ""
+        model_results = {}
         if cfg.gemini_api_key:
-            try:
-                svc = GeminiRecipeService(api_key=cfg.gemini_api_key, model=cfg.gemini_model)
-                test_recipe = svc.extract_from_text("2 eggs and 1 tbsp butter, scramble in a pan")
-                gemini_ping_ok = bool(test_recipe and test_recipe.title)
-            except Exception as e:
-                gemini_error = f"{type(e).__name__}: {e}"
+            for m in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-3.8-flash"]:
+                try:
+                    svc = GeminiRecipeService(api_key=cfg.gemini_api_key, model=m)
+                    test_recipe = svc.extract_from_text("2 eggs and 1 tbsp butter, scramble in a pan")
+                    model_results[m] = "OK" if (test_recipe and test_recipe.title) else "EMPTY"
+                except Exception as e:
+                    model_results[m] = f"{type(e).__name__}: {str(e)[:120]}"
 
         return {
             "status": "ok",
             "firebaseProjectIdConfigured": bool(cfg.firebase_project_id),
             "firebaseProjectId": cfg.firebase_project_id,
             "geminiApiKeyConfigured": bool(cfg.gemini_api_key),
-            "geminiModel": cfg.gemini_model,
+            "configuredModel": cfg.gemini_model,
             "googleCertsReachable": google_certs_ok,
-            "geminiPingOk": gemini_ping_ok,
-            "geminiError": gemini_error,
+            "modelsTested": model_results,
             "ytDlpVersion": yt_dlp.version.__version__,
         }
+
+    @app.exception_handler(HTTPException)
+    async def custom_http_exception_handler(_request, exc: HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            headers=CORS_HEADERS,
+            content={"detail": exc.detail},
+        )
 
     @app.exception_handler(Exception)
     async def global_exception_handler(_request, exc: Exception):
@@ -101,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tb = traceback.format_exc()
         return JSONResponse(
             status_code=500,
+            headers=CORS_HEADERS,
             content={
                 "detail": f"{type(exc).__name__}: {exc}",
                 "type": type(exc).__name__,
