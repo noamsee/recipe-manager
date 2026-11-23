@@ -38,7 +38,7 @@ Rules:
 class GeminiRecipeService:
     """Thin wrapper over google-genai for structured recipe operations."""
 
-    def __init__(self, api_key: str, model: str = "gemini-2.5-flash") -> None:
+    def __init__(self, api_key: str, model: str = "gemini-3.8-flash") -> None:
         if not api_key:
             raise ValueError("GEMINI_API_KEY is not configured.")
         self._client = genai.Client(api_key=api_key)
