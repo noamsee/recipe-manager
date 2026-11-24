@@ -57,3 +57,17 @@ def test_chunk_text_splits_on_paragraph_boundaries() -> None:
     chunks = _chunk_text(long_text, max_chars=300)
     assert len(chunks) > 1
     assert all(len(c) <= 300 for c in chunks)
+
+
+def test_pdf_without_text_raises_clear_error() -> None:
+    from pypdf import PdfWriter
+
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=200)
+    buf = BytesIO()
+    writer.write(buf)
+    # simulate a large blank/image PDF (> 50KB)
+    content = buf.getvalue() + (b"0" * 60_000)
+
+    with pytest.raises(UnsupportedFileFormatError, match="No selectable text"):
+        extract_text_from_onenote_bytes("scanned.pdf", content)

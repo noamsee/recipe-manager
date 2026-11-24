@@ -14,6 +14,7 @@ class Settings:
     allowed_origins: list[str]
     allow_unauthenticated_local: bool
     max_reel_filesize_mb: int = 25
+    max_onenote_filesize_mb: int = 35
 
 
 def load_settings() -> Settings:

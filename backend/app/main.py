@@ -211,17 +211,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         file: UploadFile = File(...),
         _claims: dict = Depends(verify_firebase_token),
         gemini: GeminiRecipeService = Depends(get_gemini),
+        cfg: Settings = Depends(get_settings),
     ) -> OneNoteParseResponse:
         filename = file.filename or "onenote_export.txt"
         raw_bytes = await file.read()
-        if len(raw_bytes) > 15 * 1024 * 1024:
+        max_mb = cfg.max_onenote_filesize_mb
+        if len(raw_bytes) > max_mb * 1024 * 1024:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="Uploaded file exceeds 15 MB limit.",
+                detail=f"Uploaded file exceeds {max_mb} MB limit.",
             )
         try:
             recipes = parse_onenote_export(filename=filename, content=raw_bytes, gemini=gemini)
-        except UnsupportedFileFormatError as exc:
+        except (UnsupportedFileFormatError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
         return OneNoteParseResponse(filename=filename, recipes=recipes)
 

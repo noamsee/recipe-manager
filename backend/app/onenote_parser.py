@@ -11,11 +11,11 @@ from .gemini_client import GeminiRecipeService
 from .schemas import ExtractedRecipe
 
 SUPPORTED_ONENOTE_EXTENSIONS = {".html", ".htm", ".docx", ".pdf", ".txt", ".md"}
-_MAX_CHARS_PER_CHUNK = 24000
+_MAX_CHARS_PER_CHUNK = 45000
 
 
 class UnsupportedFileFormatError(ValueError):
-    """Raised when an uploaded OneNote export has an unsupported file extension."""
+    """Raised when an uploaded OneNote export has an unsupported file extension or unextractable content."""
 
 
 def extract_text_from_onenote_bytes(filename: str, content: bytes) -> str:
@@ -45,7 +45,13 @@ def extract_text_from_onenote_bytes(filename: str, content: bytes) -> str:
     if ext == ".pdf":
         reader = PdfReader(BytesIO(content))
         pages = [(page.extract_text() or "").strip() for page in reader.pages]
-        return "\n\n".join(p for p in pages if p)
+        combined = "\n\n".join(p for p in pages if p)
+        if not combined.strip() and len(content) > 50_000:
+            raise UnsupportedFileFormatError(
+                "No selectable text found in this PDF. It appears to contain scanned images or screenshots. "
+                "Please export from OneNote as Word (.docx) or Web Page (.html), or copy-paste text directly."
+            )
+        return combined
 
     return content.decode("utf-8", errors="replace").strip()
 
