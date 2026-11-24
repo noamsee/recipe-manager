@@ -95,7 +95,8 @@ def test_group_pdf_pages_into_units_combines_short_pages() -> None:
         {"page_num": 3, "text": "Tomato Soup\n4 tomatoes", "image_data_uri": "data:img2"},
     ]
 
-    units = group_pdf_pages_into_units(pages)
+    # With max_chars_per_unit=60, pages 1 & 2 fit in unit 0, while page 3 starts unit 1
+    units = group_pdf_pages_into_units(pages, max_chars_per_unit=60)
     assert len(units) == 2
     assert units[0]["pages"] == [1, 2]
     assert "Mix ingredients" in units[0]["text"]

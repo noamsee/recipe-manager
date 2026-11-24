@@ -75,55 +75,59 @@ def extract_pdf_pages_and_images(content: bytes) -> list[dict]:
     return pages_data
 
 
-def group_pdf_pages_into_units(pages_data: list[dict], max_chars_per_unit: int = 3500) -> list[dict]:
+def _build_unit(pages: list[dict]) -> dict:
+    page_nums = [p["page_num"] for p in pages]
+    page_images = {p["page_num"]: p["image_data_uri"] for p in pages if p.get("image_data_uri")}
+    first_img = next((p["image_data_uri"] for p in pages if p.get("image_data_uri")), "")
+
+    text_parts = []
+    for p in pages:
+        p_num = p["page_num"]
+        p_text = p.get("text", "").strip()
+        if p_text:
+            text_parts.append(f"=== PAGE {p_num} ===\n{p_text}")
+
+    return {
+        "pages": page_nums,
+        "text": "\n\n".join(text_parts),
+        "image_data_uri": first_img,
+        "page_images": page_images,
+        "raw_pages": pages,
+    }
+
+
+def group_pdf_pages_into_units(
+    pages_data: list[dict],
+    max_chars_per_unit: int = 15000,
+    max_pages_per_unit: int = 6,
+) -> list[dict]:
     """
-    Group consecutive PDF pages into logical recipe units.
-    In OneNote, each page is typically 1 recipe. If page N+1 is short and continues
-    instructions or has no new title, it merges with page N.
+    Group consecutive PDF pages into multi-page batches (up to 15,000 characters or 6 pages each).
+    This consolidates a 25-page PDF into just 3-4 LLM requests, preventing quota exhaustion
+    on Gemini Free Tier (which limits Gemini models to 20 requests per day) while remaining
+    well within Gemini's 8,192 structured output token limit.
     """
     if not pages_data:
         return []
 
     units: list[dict] = []
-    current_unit: dict | None = None
+    current_pages: list[dict] = []
+    current_len = 0
 
     for page in pages_data:
-        p_text = page["text"]
-        p_img = page["image_data_uri"]
+        p_text = page.get("text", "").strip()
+        p_len = len(p_text)
 
-        if not current_unit:
-            current_unit = {
-                "pages": [page["page_num"]],
-                "text": p_text,
-                "image_data_uri": p_img,
-            }
-            continue
-
-        # Check if page looks like a continuation of current_unit
-        is_short = len(p_text) < 300
-        has_new_title = False
-        first_line = p_text.splitlines()[0].strip() if p_text.splitlines() else ""
-        if len(first_line) > 3 and len(first_line) < 60 and not any(k in first_line for k in ["1.", "2.", "•", "-"]):
-            # Looks like a heading
-            has_new_title = True
-
-        combined_len = len(current_unit["text"]) + len(p_text)
-        if not has_new_title and (is_short or combined_len < max_chars_per_unit):
-            # Merge into current unit
-            current_unit["pages"].append(page["page_num"])
-            current_unit["text"] += f"\n\n{p_text}"
-            if not current_unit["image_data_uri"] and p_img:
-                current_unit["image_data_uri"] = p_img
+        if current_pages and (current_len + p_len > max_chars_per_unit or len(current_pages) >= max_pages_per_unit):
+            units.append(_build_unit(current_pages))
+            current_pages = [page]
+            current_len = p_len
         else:
-            units.append(current_unit)
-            current_unit = {
-                "pages": [page["page_num"]],
-                "text": p_text,
-                "image_data_uri": p_img,
-            }
+            current_pages.append(page)
+            current_len += p_len
 
-    if current_unit:
-        units.append(current_unit)
+    if current_pages:
+        units.append(_build_unit(current_pages))
 
     return units
 
@@ -191,10 +195,12 @@ def _chunk_text(text: str, max_chars: int = _MAX_CHARS_PER_CHUNK) -> list[str]:
 
 
 def _extract_single_unit(unit: dict, gemini: GeminiRecipeService) -> tuple[list[ExtractedRecipe], list[UnparsedCandidate]]:
-    """Extract recipes from a single unit with strict language preservation and attached photos."""
+    """Extract recipes from a multi-page unit with strict language preservation and attached photos."""
     text = unit.get("text", "").strip()
-    image_uri = unit.get("image_data_uri", "")
-    if not text and not image_uri:
+    page_images = unit.get("page_images", {})
+    fallback_img = unit.get("image_data_uri", "")
+    raw_pages = unit.get("raw_pages", [])
+    if not text:
         return [], []
 
     # Detect if text is predominantly Hebrew
@@ -211,8 +217,9 @@ def _extract_single_unit(unit: dict, gemini: GeminiRecipeService) -> tuple[list[
 
     prompt = (
         f"{lang_instruction}\n\n"
-        f"Always set source='OneNote' and include 'OneNote' in tags.\n\n"
-        f"Section text:\n{text}"
+        f"Always set source='OneNote' and include 'OneNote' in tags.\n"
+        f"If '=== PAGE X ===' markers are present, set pageNumber to X (integer) for each recipe.\n\n"
+        f"Document text:\n{text}"
     )
 
     recipes: list[ExtractedRecipe] = []
@@ -233,9 +240,22 @@ def _extract_single_unit(unit: dict, gemini: GeminiRecipeService) -> tuple[list[
                 # Add OneNote tag if missing
                 if "OneNote" not in (r.tags or []):
                     r.tags = list(r.tags or []) + ["OneNote"]
-                # Attach photo from this page if available and recipe has none
-                if image_uri and not r.thumbnailUrl:
-                    r.thumbnailUrl = image_uri
+
+                # Attach photo from this recipe's page
+                assigned_img = ""
+                if getattr(r, "pageNumber", None) and r.pageNumber in page_images:
+                    assigned_img = page_images[r.pageNumber]
+                elif raw_pages:
+                    for p in raw_pages:
+                        p_t = p.get("text", "")
+                        if p.get("image_data_uri") and (r.title in p_t or (len(p_t) > 10 and p_t[:25] in r.title)):
+                            assigned_img = p["image_data_uri"]
+                            break
+                if not assigned_img:
+                    assigned_img = fallback_img
+
+                if assigned_img and not r.thumbnailUrl:
+                    r.thumbnailUrl = assigned_img
 
                 recipes.append(r)
 

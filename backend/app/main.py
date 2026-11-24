@@ -112,13 +112,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         client = genai.Client(api_key=cfg.gemini_api_key)
         candidates = [
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-pro",
             "gemini-3.5-flash-lite",
             "gemini-3.1-flash-lite",
             "gemini-3.5-flash",
             "gemini-3.6-flash",
-            "gemma-4-26b-a4b-it",
-            "gemma-4-31b-it",
-            "gemini-omni-flash-preview",
         ]
         results = {}
         for m in candidates:

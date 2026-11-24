@@ -34,6 +34,7 @@ class ExtractedRecipe(BaseModel):
     sourceUrl: str | None = None
     thumbnailUrl: str | None = None
     source: str = Field(default="Manual")
+    pageNumber: int | None = Field(default=None, description="The 1-based page number where this recipe was found.")
 
 
 class UnparsedCandidate(BaseModel):

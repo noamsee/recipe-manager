@@ -40,6 +40,7 @@ CRITICAL LANGUAGE PRESERVATION RULES:
 SOURCE & TAG RULES:
 - Always set source='OneNote'.
 - Always include 'OneNote' in the tags list.
+- If page markers like '=== PAGE X ===' are present in the text, set pageNumber to X (integer).
 - Ignore completely unrelated non-food notes (e.g. passwords, shopping lists, meeting minutes).
 - Suggest concise category, dietary tags from [meat, dairy, parve, vegan, vegetarian, gluten-free], and 2-6 helpful tags.
 """.strip()
@@ -106,9 +107,12 @@ class GeminiRecipeService:
                     err_str = str(exc)
                     attempt_log.append(f"{model_name}[att {attempt + 1}]: {err_str[:100]}")
 
-                    # If quota exhausted (429), pause 2.0s to allow token/rate bucket to replenish before next try
+                    # If quota exhausted (429):
+                    # If daily request limit reached for this specific model, immediately try the next model.
+                    # Otherwise, pause 2.0s to allow rate-limit token bucket to replenish.
                     if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
-                        time.sleep(2.0)
+                        if "per day" not in err_str.lower() and "retry in" not in err_str.lower():
+                            time.sleep(2.0)
                         break
 
                     # If 503 or UNAVAILABLE spike on primary, sleep 1.5s before attempt 2
