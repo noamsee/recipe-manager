@@ -21,11 +21,30 @@ import {
 } from './firebase-client.js?v=5';
 import {
   buildBatchQueue,
+  clearAllUnparsableItems,
+  deleteImportLog,
+  deleteQueueItem,
+  enqueueBatchItems,
+  eraseQueueItemOnSuccess,
   extractRecipesFromOneNoteFile,
+  formatCountdown,
+  isItemReadyForRetry,
+  loadUserImportLogs,
+  loadUserImportQueue,
+  MAX_RETRY_ATTEMPTS,
+  normalizeReelUrl,
+  parseWhatsAppExport,
   processBatchQueue,
+  recordQueueItemFailure,
+  resetQueueItemForRetry,
   runCaptionFallbackExtraction,
   runSingleReelExtraction,
 } from './importer.js?v=5';
+import {
+  classifyQueueItems,
+  computeNextStatusAndRetry,
+  createAttemptRecord,
+} from './import-queue-logic.js?v=5';
 import {
   compressImageToDataUri,
   createOrUpdateShareLink,
@@ -54,6 +73,9 @@ const state = {
   pendingThumbnailDataUri: '',
   pendingOneNoteRecipes: [],
   filters: { search: '', category: 'ALL', language: 'ALL', dietary: 'ALL' },
+  importQueue: [],
+  importLogs: [],
+  isBatchRunning: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -94,6 +116,10 @@ function switchView(viewName) {
   });
   if (viewName !== 'detail' && isWakeLockActive()) {
     setWakeLockEnabled(false, updateWakeLockButton);
+  }
+  if (viewName === 'import' && state.user) {
+    refreshImportQueue().catch(console.warn);
+    refreshImportLogs().catch(console.warn);
   }
 }
 
@@ -625,6 +651,10 @@ function bindEvents() {
       for (const pane of ['single-reel', 'batch-whatsapp', 'onenote', 'paste-text']) {
         $(`pane-${pane}`).hidden = pane !== target;
       }
+      if (target === 'batch-whatsapp') {
+        refreshImportQueue().catch(console.warn);
+        refreshImportLogs().catch(console.warn);
+      }
     });
   });
 
@@ -750,7 +780,314 @@ function bindEvents() {
     }
   });
 
-  // Batch & WhatsApp importer
+  // --- Persistent Batch Import Queue & Attempt Logs ---
+
+  const switchBatchSubtab = (targetSubtab) => {
+    document.querySelectorAll('[data-batch-subtab]').forEach((b) => {
+      b.classList.toggle('active', b.dataset.batchSubtab === targetSubtab);
+    });
+    for (const p of ['new-batch', 'active-queue', 'unparsable', 'past-logs']) {
+      const pane = $(`subpane-${p}`);
+      if (pane) pane.hidden = p !== targetSubtab;
+    }
+    if (targetSubtab === 'active-queue' || targetSubtab === 'unparsable') {
+      refreshImportQueue().catch(console.warn);
+    } else if (targetSubtab === 'past-logs') {
+      refreshImportLogs().catch(console.warn);
+    }
+  };
+
+  document.querySelectorAll('[data-batch-subtab]').forEach((btn) => {
+    btn.addEventListener('click', () => switchBatchSubtab(btn.dataset.batchSubtab));
+  });
+
+  const renderQueueCountdownTimers = () => {
+    const now = Date.now();
+    document.querySelectorAll('[data-next-retry]').forEach((el) => {
+      const nextMs = Number(el.dataset.nextRetry);
+      if (nextMs) {
+        const remaining = nextMs - now;
+        if (remaining <= 0) {
+          el.textContent = 'Ready to retry';
+          el.className = 'chip chip-ready';
+        } else {
+          el.textContent = `⏳ Retry in ${formatCountdown(remaining)}`;
+        }
+      }
+    });
+  };
+
+  const switchToSingleReelFallback = (url) => {
+    document.querySelectorAll('[data-import-tab]').forEach((b) =>
+      b.classList.toggle('active', b.dataset.importTab === 'single-reel')
+    );
+    for (const pane of ['single-reel', 'batch-whatsapp', 'onenote', 'paste-text']) {
+      $(`pane-${pane}`).hidden = pane !== 'single-reel';
+    }
+    const singleUrlInput = $('single-reel-url');
+    if (singleUrlInput) singleUrlInput.value = url;
+    const fallbackBox = $('reel-fallback-box');
+    if (fallbackBox) fallbackBox.hidden = false;
+    const captionText = $('fallback-caption-text');
+    if (captionText) captionText.focus();
+    showToast('Switched to Single Reel tab. Paste caption or recipe text to extract with Gemini!');
+  };
+
+  const refreshImportQueue = async () => {
+    if (!state.user) return;
+    try {
+      state.importQueue = await loadUserImportQueue(state.user.uid);
+    } catch (err) {
+      console.warn('Failed loading import queue:', err);
+      return;
+    }
+
+    const { ready, waiting, unparsable, processing } = classifyQueueItems(state.importQueue);
+    const activeCount = ready.length + waiting.length + processing.length;
+
+    // Badges
+    const queueBadge = $('batch-queue-badge');
+    if (queueBadge) {
+      queueBadge.textContent = String(activeCount);
+      queueBadge.hidden = activeCount === 0;
+    }
+    const unparsableBadge = $('batch-unparsable-badge');
+    if (unparsableBadge) {
+      unparsableBadge.textContent = String(unparsable.length);
+      unparsableBadge.hidden = unparsable.length === 0;
+    }
+
+    // Alert Banner
+    const banner = $('batch-alert-banner');
+    if (banner) {
+      if (unparsable.length > 0) {
+        banner.innerHTML = `<span>⚠️ <strong>${unparsable.length} unparsable URL(s)</strong> reached 10 failed attempts.</span> <button type="button" class="btn-ghost btn-sm" id="banner-view-unparsable-btn">View Unparsable URLs</button>`;
+        banner.hidden = false;
+        $('banner-view-unparsable-btn')?.addEventListener('click', () => switchBatchSubtab('unparsable'));
+      } else if (waiting.length > 0) {
+        const nextTime = formatCountdown((Number(waiting[0].nextRetryAt) || 0) - Date.now());
+        banner.innerHTML = `<span>⏳ <strong>${waiting.length} failed item(s)</strong> waiting on 10-minute retry cooldown (next in ${nextTime}). Auto-retrying while tab is open.</span> <button type="button" class="btn-ghost btn-sm" id="banner-view-queue-btn">View Queue</button>`;
+        banner.hidden = false;
+        $('banner-view-queue-btn')?.addEventListener('click', () => switchBatchSubtab('active-queue'));
+      } else {
+        banner.hidden = true;
+      }
+    }
+
+    // Active Queue Card List
+    const queueList = $('batch-queue-list');
+    const queueStatusText = $('queue-status-text');
+    if (queueStatusText) {
+      queueStatusText.textContent = `${activeCount} item(s) active (${ready.length} ready, ${waiting.length} in 10-min cooldown, ${processing.length} processing).`;
+    }
+
+    if (queueList) {
+      const activeItems = [...processing, ...ready, ...waiting];
+      if (activeItems.length === 0) {
+        queueList.innerHTML = '<div class="empty-state">No items waiting in active queue. Successful imports are automatically erased from table.</div>';
+      } else {
+        queueList.innerHTML = '';
+        activeItems.forEach((item) => {
+          const card = document.createElement('div');
+          card.className = 'queue-item-card';
+
+          const isProc = item.status === 'processing';
+          const isFailed = item.status === 'failed';
+          const isPending = item.status === 'pending';
+          const now = Date.now();
+          const msLeft = (Number(item.nextRetryAt) || 0) - now;
+          const isReady = isPending || (isFailed && msLeft <= 0);
+
+          let chipHtml = '';
+          if (isProc) {
+            chipHtml = '<span class="chip chip-processing">Processing...</span>';
+          } else if (isReady) {
+            chipHtml = `<span class="chip chip-ready">Ready to retry</span> <span class="muted small">(Attempt ${item.attempts || 0}/10)</span>`;
+          } else {
+            chipHtml = `<span class="chip chip-cooldown" data-next-retry="${item.nextRetryAt}">⏳ Retry in ${formatCountdown(msLeft)}</span> <span class="muted small">(Attempt ${item.attempts}/10)</span>`;
+          }
+
+          card.innerHTML = `
+            <div class="queue-item-header">
+              <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="queue-url">${escapeHtml(item.url)}</a>
+              <div class="queue-badges">${chipHtml}</div>
+            </div>
+            ${item.lastError ? `<div class="queue-error-preview">Last error: ${escapeHtml(item.lastError)}</div>` : ''}
+            <div class="queue-actions">
+              <button type="button" class="btn-secondary btn-sm" data-action="retry-single">Retry Now</button>
+              <button type="button" class="btn-ghost btn-sm" data-action="paste-caption-single">Paste Caption</button>
+              <button type="button" class="btn-ghost btn-sm" data-action="dismiss-single">Dismiss</button>
+            </div>
+          `;
+
+          card.querySelector('[data-action="retry-single"]')?.addEventListener('click', () => {
+            runBatchImport([item], true);
+          });
+          card.querySelector('[data-action="paste-caption-single"]')?.addEventListener('click', () => {
+            switchToSingleReelFallback(item.url);
+          });
+          card.querySelector('[data-action="dismiss-single"]')?.addEventListener('click', async () => {
+            await deleteQueueItem(item.id);
+            await refreshImportQueue();
+            showToast('Item dismissed from queue.');
+          });
+
+          queueList.appendChild(card);
+        });
+      }
+    }
+
+    // Unparsable List
+    const unparsableList = $('batch-unparsable-list');
+    if (unparsableList) {
+      if (unparsable.length === 0) {
+        unparsableList.innerHTML = '<div class="empty-state">No unparsable URLs. URLs that fail 10 retry attempts will be listed here.</div>';
+      } else {
+        unparsableList.innerHTML = '';
+        unparsable.forEach((item) => {
+          const card = document.createElement('div');
+          card.className = 'queue-item-card unparsable';
+
+          const history = item.history || [];
+          const historyHtml = history
+            .map(
+              (h) => `
+                <div class="history-item">
+                  <div class="history-meta">Attempt ${h.attempt} • ${new Date(h.timestamp).toLocaleTimeString()}</div>
+                  <div class="history-error">${escapeHtml(h.error)}</div>
+                </div>
+              `
+            )
+            .join('');
+
+          card.innerHTML = `
+            <div class="queue-item-header">
+              <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="queue-url">${escapeHtml(item.url)}</a>
+              <div class="queue-badges">
+                <span class="chip chip-unparsable">10/10 Attempts Failed (Unparsable)</span>
+              </div>
+            </div>
+            <div class="queue-error-preview">Last error: ${escapeHtml(item.lastError || 'Persistent extraction failure')}</div>
+            <div class="queue-actions">
+              <button type="button" class="btn-primary btn-sm" data-action="paste-caption">Paste Caption</button>
+              <button type="button" class="btn-secondary btn-sm" data-action="reset-retry">Reset &amp; Retry</button>
+              <button type="button" class="btn-ghost btn-sm" data-action="toggle-history">Attempt History (${history.length})</button>
+              <button type="button" class="btn-danger btn-sm" data-action="dismiss">Dismiss</button>
+            </div>
+            <div class="history-drawer stack" hidden>
+              <strong>Attempt History Log:</strong>
+              ${historyHtml || '<div class="muted small">No detailed history recorded.</div>'}
+            </div>
+          `;
+
+          const drawer = card.querySelector('.history-drawer');
+          card.querySelector('[data-action="toggle-history"]')?.addEventListener('click', (e) => {
+            drawer.hidden = !drawer.hidden;
+            e.currentTarget.textContent = drawer.hidden
+              ? `Attempt History (${history.length})`
+              : 'Hide History';
+          });
+          card.querySelector('[data-action="paste-caption"]')?.addEventListener('click', () => {
+            switchToSingleReelFallback(item.url);
+          });
+          card.querySelector('[data-action="reset-retry"]')?.addEventListener('click', async () => {
+            await resetQueueItemForRetry(item.id);
+            await refreshImportQueue();
+            showToast('Item reset to pending. Retrying now...');
+            runBatchImport([{ ...item, attempts: 0, status: 'pending' }], true);
+          });
+          card.querySelector('[data-action="dismiss"]')?.addEventListener('click', async () => {
+            await deleteQueueItem(item.id);
+            await refreshImportQueue();
+            showToast('Unparsable URL dismissed.');
+          });
+
+          unparsableList.appendChild(card);
+        });
+      }
+    }
+  };
+
+  const refreshImportLogs = async () => {
+    if (!state.user) return;
+    try {
+      state.importLogs = await loadUserImportLogs(state.user.uid, 25);
+    } catch (err) {
+      console.warn('Failed loading import logs:', err);
+      return;
+    }
+
+    const logsList = $('batch-past-logs-list');
+    if (!logsList) return;
+
+    if (state.importLogs.length === 0) {
+      logsList.innerHTML = '<div class="empty-state">No past import logs recorded yet. Logs will appear here after running batch imports.</div>';
+      return;
+    }
+
+    logsList.innerHTML = '';
+    state.importLogs.forEach((log) => {
+      const card = document.createElement('div');
+      card.className = 'log-session-card';
+
+      const dateStr = log.createdAtMs
+        ? new Date(log.createdAtMs).toLocaleString()
+        : 'Recent session';
+
+      const details = log.details || [];
+      const detailsLines = details
+        .map((d) => {
+          let icon = '⚪';
+          if (d.status === 'saved') icon = '✅';
+          else if (d.status === 'skipped') icon = '⏩';
+          else if (d.status === 'blocked') icon = '⚠️';
+          else if (d.status === 'failed') icon = '❌';
+          else if (d.status === 'unparsable') icon = '🔴';
+          return `<div>${icon} [${d.status.toUpperCase()}] ${escapeHtml(d.url)}: ${escapeHtml(d.title || d.message || '')}</div>`;
+        })
+        .join('');
+
+      card.innerHTML = `
+        <div class="card-header-row">
+          <div>
+            <strong>${escapeHtml(dateStr)}</strong>
+            <div class="muted small">${log.totalUrls || details.length} total URL(s) processed</div>
+          </div>
+          <div class="log-metrics">
+            <span class="chip chip-ready">✅ ${log.savedCount || 0} saved</span>
+            <span class="chip chip-pending">⏩ ${log.skippedCount || 0} skipped</span>
+            ${log.failedCount ? `<span class="chip chip-cooldown">❌ ${log.failedCount} failed</span>` : ''}
+            ${log.blockedCount ? `<span class="chip chip-cooldown">⚠️ ${log.blockedCount} blocked</span>` : ''}
+            ${log.unparsableCount ? `<span class="chip chip-unparsable">🔴 ${log.unparsableCount} unparsable</span>` : ''}
+          </div>
+        </div>
+        <div class="row">
+          <button type="button" class="btn-ghost btn-sm" data-action="toggle-details">Show Details (${details.length})</button>
+          <button type="button" class="btn-ghost btn-sm" data-action="delete-log" data-id="${log.id}">Delete Log</button>
+        </div>
+        <div class="log-details-box stack" hidden>
+          ${detailsLines || '<div class="muted">No event details recorded.</div>'}
+        </div>
+      `;
+
+      const detailsBox = card.querySelector('.log-details-box');
+      card.querySelector('[data-action="toggle-details"]')?.addEventListener('click', (e) => {
+        detailsBox.hidden = !detailsBox.hidden;
+        e.currentTarget.textContent = detailsBox.hidden
+          ? `Show Details (${details.length})`
+          : 'Hide Details';
+      });
+      card.querySelector('[data-action="delete-log"]')?.addEventListener('click', async () => {
+        await deleteImportLog(log.id);
+        await refreshImportLogs();
+        showToast('Log entry removed.');
+      });
+
+      logsList.appendChild(card);
+    });
+  };
+
+  // WhatsApp file picker
   $('whatsapp-file-input').addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -768,7 +1105,11 @@ function bindEvents() {
     $('batch-retry-failed-btn').hidden = true;
   });
 
-  const runBatchImport = async (targetItems = null) => {
+  const runBatchImport = async (targetItems = null, alreadyEnqueued = false) => {
+    if (state.isBatchRunning) {
+      return showToast('A batch import is already in progress. Please wait for it to complete.', true);
+    }
+
     const whatsappText = $('batch-urls-input').dataset.whatsappText || '';
     const queue = targetItems || buildBatchQueue({
       urlsText: $('batch-urls-input').value,
@@ -781,60 +1122,78 @@ function bindEvents() {
       return showToast('No Reel URLs to process in queue.', true);
     }
 
+    // Switch to new-batch subpane if starting fresh
+    if (!targetItems) {
+      switchBatchSubtab('new-batch');
+    }
+
     const log = $('batch-log');
     log.hidden = false;
     log.innerHTML = '';
     $('batch-run-btn').disabled = true;
     $('batch-retry-failed-btn').hidden = true;
+    state.isBatchRunning = true;
 
     try {
-      const summary = await processBatchQueue(state.user.uid, queue, (evt) => {
-        const line = document.createElement('div');
-        line.className = 'batch-log-item';
-        if (evt.type === 'wake') {
-          line.textContent = `[Server] ${evt.message}`;
-          line.classList.add('muted');
-        } else if (evt.type === 'item_start') {
-          line.textContent = `[${evt.index + 1}/${evt.total}] Processing ${evt.url}...`;
-        } else if (evt.type === 'item_done') {
-          if (evt.status === 'saved') {
-            line.innerHTML = `✅ [${evt.index + 1}/${evt.total}] <strong>SAVED:</strong> "${escapeHtml(evt.title)}" <span class="muted">(${escapeHtml(evt.url)})</span>`;
-            line.classList.add('log-success');
-          } else if (evt.status === 'skipped') {
-            line.innerHTML = `⏩ [${evt.index + 1}/${evt.total}] <strong>SKIPPED:</strong> Recipe already exists ("${escapeHtml(evt.title)}") <span class="muted">(${escapeHtml(evt.url)})</span>`;
-            line.classList.add('log-skipped');
-          } else if (evt.status === 'blocked') {
-            line.innerHTML = `⚠️ [${evt.index + 1}/${evt.total}] <strong>BLOCKED:</strong> ${escapeHtml(evt.message)} <span class="muted">(${escapeHtml(evt.url)})</span>`;
-            line.classList.add('log-warning');
-          } else if (evt.status === 'failed') {
-            line.innerHTML = `❌ [${evt.index + 1}/${evt.total}] <strong>FAILED:</strong> ${escapeHtml(evt.message)} <span class="muted">(${escapeHtml(evt.url)})</span>`;
-            line.classList.add('log-error');
+      const summary = await processBatchQueue(
+        state.user.uid,
+        queue,
+        (evt) => {
+          const line = document.createElement('div');
+          line.className = 'batch-log-item';
+          if (evt.type === 'wake') {
+            line.textContent = `[Server] ${evt.message}`;
+            line.classList.add('muted');
+          } else if (evt.type === 'item_start') {
+            line.textContent = `[${evt.index + 1}/${evt.total}] Processing ${evt.url} (Attempt ${(evt.attempts || 0) + 1})...`;
+          } else if (evt.type === 'item_done') {
+            if (evt.status === 'saved') {
+              line.innerHTML = `✅ [${evt.index + 1}/${evt.total}] <strong>SAVED &amp; ERASED FROM QUEUE:</strong> "${escapeHtml(evt.title)}" <span class="muted">(${escapeHtml(evt.url)})</span>`;
+              line.classList.add('log-success');
+            } else if (evt.status === 'skipped') {
+              line.innerHTML = `⏩ [${evt.index + 1}/${evt.total}] <strong>SKIPPED:</strong> Recipe already exists ("${escapeHtml(evt.title)}") <span class="muted">(${escapeHtml(evt.url)})</span>`;
+              line.classList.add('log-skipped');
+            } else if (evt.status === 'unparsable') {
+              line.innerHTML = `🔴 [${evt.index + 1}/${evt.total}] <strong>UNPARSABLE (10 Attempts Reached):</strong> ${escapeHtml(evt.message)} <span class="muted">(${escapeHtml(evt.url)})</span>`;
+              line.classList.add('log-error');
+            } else if (evt.status === 'blocked') {
+              line.innerHTML = `⚠️ [${evt.index + 1}/${evt.total}] <strong>BLOCKED:</strong> Scheduled retry in 10 minutes (${evt.attempts}/10): ${escapeHtml(evt.message)} <span class="muted">(${escapeHtml(evt.url)})</span>`;
+              line.classList.add('log-warning');
+            } else if (evt.status === 'failed') {
+              line.innerHTML = `❌ [${evt.index + 1}/${evt.total}] <strong>FAILED:</strong> Scheduled retry in 10 minutes (${evt.attempts}/10): ${escapeHtml(evt.message)} <span class="muted">(${escapeHtml(evt.url)})</span>`;
+              line.classList.add('log-error');
+            }
           }
-        }
-        log.appendChild(line);
-        log.scrollTop = log.scrollHeight;
-      }, state.recipes);
+          log.appendChild(line);
+          log.scrollTop = log.scrollHeight;
+        },
+        state.recipes,
+        alreadyEnqueued
+      );
 
       await refreshLibrary();
+      await refreshImportQueue();
+      await refreshImportLogs();
 
-      const summaryMsg = `Batch complete: ${summary.saved} saved, ${summary.skipped} skipped (already existed), ${summary.blocked.length} blocked, ${summary.failed.length} failed.`;
+      const summaryMsg = `Batch complete: ${summary.saved} saved, ${summary.skipped} skipped, ${summary.failed.length + summary.blocked.length} scheduled for 10-min retry, ${summary.unparsable.length} unparsable.`;
       showToast(summaryMsg);
 
       const summaryLine = document.createElement('div');
       summaryLine.className = 'batch-log-item';
       summaryLine.style.marginTop = '0.5rem';
       summaryLine.style.fontWeight = '600';
-      summaryLine.textContent = `--- Finished: ${summary.saved} newly saved, ${summary.skipped} already existed, ${summary.blocked.length} blocked, ${summary.failed.length} failed ---`;
+      summaryLine.textContent = `--- Finished: ${summary.saved} saved & erased from queue, ${summary.skipped} already existed, ${summary.failed.length + summary.blocked.length} scheduled for 10-min retry, ${summary.unparsable.length} unparsable ---`;
       log.appendChild(summaryLine);
 
       const retryableItems = [...summary.blocked, ...summary.failed];
       if (retryableItems.length > 0) {
         state.lastBatchRetryableItems = retryableItems;
         const retryBtn = $('batch-retry-failed-btn');
-        retryBtn.textContent = `Retry Failed / Blocked Only (${retryableItems.length})`;
+        retryBtn.textContent = `Retry Failed / Blocked Now (${retryableItems.length})`;
         retryBtn.hidden = false;
       }
     } finally {
+      state.isBatchRunning = false;
       $('batch-run-btn').disabled = false;
     }
   };
@@ -843,9 +1202,7 @@ function bindEvents() {
 
   $('batch-retry-failed-btn').addEventListener('click', () => {
     if (state.lastBatchRetryableItems?.length) {
-      $('batch-urls-input').value = state.lastBatchRetryableItems.map((i) => i.url).join('\n');
-      $('batch-urls-input').dataset.whatsappText = '';
-      runBatchImport(state.lastBatchRetryableItems);
+      runBatchImport(state.lastBatchRetryableItems, true);
     }
   });
 
@@ -858,6 +1215,54 @@ function bindEvents() {
     $('batch-retry-failed-btn').hidden = true;
     $('whatsapp-file-input').value = '';
   });
+
+  // Action buttons for queue subpane
+  $('queue-retry-ready-btn')?.addEventListener('click', () => {
+    const { ready } = classifyQueueItems(state.importQueue);
+    if (!ready.length) return showToast('No items currently ready for retry.', true);
+    runBatchImport(ready, true);
+  });
+
+  $('queue-retry-all-btn')?.addEventListener('click', () => {
+    const { ready, waiting } = classifyQueueItems(state.importQueue);
+    const all = [...ready, ...waiting];
+    if (!all.length) return showToast('No pending or failed items in queue.', true);
+    runBatchImport(all, true);
+  });
+
+  $('queue-refresh-btn')?.addEventListener('click', () => refreshImportQueue());
+
+  // Action buttons for unparsable subpane
+  $('unparsable-refresh-btn')?.addEventListener('click', () => refreshImportQueue());
+
+  $('unparsable-clear-all-btn')?.addEventListener('click', async () => {
+    if (!confirm('Are you sure you want to dismiss and clear all unparsable URLs?')) return;
+    await clearAllUnparsableItems(state.user.uid);
+    await refreshImportQueue();
+    showToast('All unparsable URLs cleared.');
+  });
+
+  // Action buttons for past logs subpane
+  $('logs-refresh-btn')?.addEventListener('click', () => refreshImportLogs());
+
+  // Interval: live countdowns every 5s & auto-retry check when tab is open
+  setInterval(async () => {
+    renderQueueCountdownTimers();
+
+    if (!state.user || state.isBatchRunning) return;
+
+    // Check if any items in importQueue are failed and reached their 10-minute cooldown
+    const now = Date.now();
+    const readyToAutoRetry = (state.importQueue || []).filter(
+      (item) => item.status === 'failed' && Number(item.nextRetryAt) <= now
+    );
+
+    if (readyToAutoRetry.length > 0) {
+      console.log(`[Auto-Retry] Triggering batch for ${readyToAutoRetry.length} ready item(s)...`);
+      showToast(`Auto-retrying ${readyToAutoRetry.length} failed item(s) whose 10-minute cooldown elapsed...`);
+      await runBatchImport(readyToAutoRetry, true);
+    }
+  }, 10000);
 
   // OneNote importer
   $('onenote-parse-btn').addEventListener('click', async () => {
@@ -943,9 +1348,14 @@ function init() {
       switchTopLevelScreen('app-shell');
       switchView('library');
       try {
-        await Promise.all([refreshLibrary(), refreshShoppingList()]);
+        await Promise.all([
+          refreshLibrary(),
+          refreshShoppingList(),
+          refreshImportQueue().catch(console.warn),
+          refreshImportLogs().catch(console.warn),
+        ]);
       } catch (dbErr) {
-        console.error('Failed loading library/shopping list:', dbErr);
+        console.error('Failed loading library/shopping list/queue:', dbErr);
       }
     });
   } catch (err) {

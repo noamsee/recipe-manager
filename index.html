@@ -33,7 +33,7 @@
   <meta name="twitter:description" content="Your bilingual Hebrew & English kitchen library. Extract recipes from Instagram & Facebook Reels, WhatsApp chats, and OneNote." />
   <meta name="twitter:image" content="https://noamsee.github.io/recipe-manager/assets/og-preview.png?v=2" />
 
-  <link rel="stylesheet" href="css/styles.css?v=5" />
+  <link rel="stylesheet" href="css/styles.css?v=6" />
 </head>
 <body>
   <div id="toast" class="toast" hidden></div>
@@ -217,21 +217,87 @@
           </div>
 
           <div id="pane-batch-whatsapp" class="stack" hidden>
-            <label>
-              Upload WhatsApp "Export Chat (Without Media)" .txt file
-              <input id="whatsapp-file-input" type="file" accept=".txt,text/plain" />
-            </label>
-            <p id="batch-summary" class="muted"></p>
-            <label>
-              Queued Facebook / Instagram Reel URLs (one per line)
-              <textarea id="batch-urls-input" rows="7" placeholder="https://www.instagram.com/reel/...&#10;https://www.facebook.com/share/r/..."></textarea>
-            </label>
-            <div class="row">
-              <button id="batch-run-btn" type="button" class="btn-primary">Process Batch Queue</button>
-              <button id="batch-retry-failed-btn" type="button" class="btn-secondary" hidden>Retry Failed / Blocked Only</button>
-              <button id="batch-clear-btn" type="button" class="btn-ghost btn-sm">Clear</button>
+            <!-- Sub-navigation for Batch Import features -->
+            <div class="sub-tab-bar">
+              <button type="button" class="sub-tab-btn active" data-batch-subtab="new-batch">New Batch</button>
+              <button type="button" class="sub-tab-btn" data-batch-subtab="active-queue">
+                Active Queue &amp; Retries <span id="batch-queue-badge" class="badge-count" hidden>0</span>
+              </button>
+              <button type="button" class="sub-tab-btn" data-batch-subtab="unparsable">
+                Unparsable URLs <span id="batch-unparsable-badge" class="badge-count badge-danger" hidden>0</span>
+              </button>
+              <button type="button" class="sub-tab-btn" data-batch-subtab="past-logs">
+                Past Import Logs
+              </button>
             </div>
-            <div id="batch-log" class="batch-log" hidden></div>
+
+            <!-- Global Alert Banner for Queue notices -->
+            <div id="batch-alert-banner" class="batch-alert-banner" hidden></div>
+
+            <!-- Subpane 1: New Batch -->
+            <div id="subpane-new-batch" class="stack">
+              <label>
+                Upload WhatsApp "Export Chat (Without Media)" .txt file
+                <input id="whatsapp-file-input" type="file" accept=".txt,text/plain" />
+              </label>
+              <p id="batch-summary" class="muted"></p>
+              <label>
+                Queued Facebook / Instagram Reel URLs (one per line)
+                <textarea id="batch-urls-input" rows="7" placeholder="https://www.instagram.com/reel/...&#10;https://www.facebook.com/share/r/..."></textarea>
+              </label>
+              <div class="row">
+                <button id="batch-run-btn" type="button" class="btn-primary">Process Batch Queue</button>
+                <button id="batch-retry-failed-btn" type="button" class="btn-secondary" hidden>Retry Failed / Blocked Only</button>
+                <button id="batch-clear-btn" type="button" class="btn-ghost btn-sm">Clear</button>
+              </div>
+              <div id="batch-log" class="batch-log" hidden></div>
+            </div>
+
+            <!-- Subpane 2: Active Queue & Retries -->
+            <div id="subpane-active-queue" class="stack" hidden>
+              <div class="card-header-row">
+                <div>
+                  <h3 class="subheading">Active Queue &amp; 10-Minute Retries</h3>
+                  <p class="muted small">URLs are saved in Firestore and retried automatically after 10 minutes when temporary errors or rate limits occur. No need to re-upload files.</p>
+                </div>
+                <div class="row">
+                  <button id="queue-retry-ready-btn" type="button" class="btn-primary btn-sm">Retry Ready Now</button>
+                  <button id="queue-retry-all-btn" type="button" class="btn-secondary btn-sm">Retry All Failed Now</button>
+                  <button id="queue-refresh-btn" type="button" class="btn-ghost btn-sm">Refresh</button>
+                </div>
+              </div>
+              <div id="queue-status-text" class="muted small"></div>
+              <div id="batch-queue-list" class="queue-list stack"></div>
+            </div>
+
+            <!-- Subpane 3: Unparsable URLs (Failed 10 Attempts) -->
+            <div id="subpane-unparsable" class="stack" hidden>
+              <div class="card-header-row">
+                <div>
+                  <h3 class="subheading">Unparsable URLs (Failed 10 Attempts)</h3>
+                  <p class="muted small">These URLs reached the maximum limit of 10 retry attempts without succeeding (e.g. login walls, private posts, or deleted reels). You can paste captions manually, reset them, or dismiss them.</p>
+                </div>
+                <div class="row">
+                  <button id="unparsable-clear-all-btn" type="button" class="btn-danger btn-sm">Clear All Unparsable</button>
+                  <button id="unparsable-refresh-btn" type="button" class="btn-ghost btn-sm">Refresh</button>
+                </div>
+              </div>
+              <div id="batch-unparsable-list" class="queue-list stack"></div>
+            </div>
+
+            <!-- Subpane 4: Past Import Attempt Logs -->
+            <div id="subpane-past-logs" class="stack" hidden>
+              <div class="card-header-row">
+                <div>
+                  <h3 class="subheading">Past Import Attempt Logs</h3>
+                  <p class="muted small">Historical logs and results from previous batch import executions.</p>
+                </div>
+                <div class="row">
+                  <button id="logs-refresh-btn" type="button" class="btn-ghost btn-sm">Refresh Logs</button>
+                </div>
+              </div>
+              <div id="batch-past-logs-list" class="logs-list stack"></div>
+            </div>
           </div>
 
           <div id="pane-onenote" class="stack" hidden>
@@ -300,6 +366,6 @@
     </main>
   </div>
 
-  <script type="module" src="js/app.js?v=5"></script>
+  <script type="module" src="js/app.js?v=6"></script>
 </body>
 </html>

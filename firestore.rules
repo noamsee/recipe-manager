@@ -32,6 +32,16 @@ service cloud.firestore {
       allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
     }
 
+    match /importQueue/{itemId} {
+      allow read, update, delete: if canAccessOwnedDoc(resource.data);
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+    }
+
+    match /importLogs/{logId} {
+      allow read, update, delete: if canAccessOwnedDoc(resource.data);
+      allow create: if request.auth != null && request.resource.data.ownerUid == request.auth.uid;
+    }
+
     match /sharedRecipes/{shareId} {
       allow get: if true;
       allow list: if false;
