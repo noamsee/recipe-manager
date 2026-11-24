@@ -222,10 +222,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 detail=f"Uploaded file exceeds {max_mb} MB limit.",
             )
         try:
-            recipes = parse_onenote_export(filename=filename, content=raw_bytes, gemini=gemini)
+            recipes, unparsed = parse_onenote_export(filename=filename, content=raw_bytes, gemini=gemini)
         except (UnsupportedFileFormatError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        return OneNoteParseResponse(filename=filename, recipes=recipes)
+        return OneNoteParseResponse(filename=filename, recipes=recipes, unparsed=unparsed)
 
     @app.post("/api/translate", response_model=ExtractedRecipe)
     def translate_endpoint(

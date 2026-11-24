@@ -8,7 +8,7 @@ from docx import Document
 from pypdf import PdfReader
 
 from .gemini_client import GeminiRecipeService
-from .schemas import ExtractedRecipe
+from .schemas import ExtractedRecipe, UnparsedCandidate
 
 SUPPORTED_ONENOTE_EXTENSIONS = {".html", ".htm", ".docx", ".pdf", ".txt", ".md"}
 _MAX_CHARS_PER_CHUNK = 45000
@@ -84,13 +84,21 @@ def parse_onenote_export(
     filename: str,
     content: bytes,
     gemini: GeminiRecipeService,
-) -> list[ExtractedRecipe]:
-    """Extract structured recipes from an exported OneNote document."""
+) -> tuple[list[ExtractedRecipe], list[UnparsedCandidate]]:
+    """Extract structured recipes and unparsed candidate notes from an exported OneNote document."""
     text = extract_text_from_onenote_bytes(filename, content)
     if not text.strip():
-        return []
+        return [], []
 
     all_recipes: list[ExtractedRecipe] = []
+    all_unparsed: list[UnparsedCandidate] = []
     for chunk in _chunk_text(text):
-        all_recipes.extend(gemini.extract_from_onenote_text(chunk))
-    return all_recipes
+        res = gemini.extract_from_onenote_text(chunk)
+        if isinstance(res, list):
+            all_recipes.extend(res)
+        else:
+            if hasattr(res, "recipes") and res.recipes:
+                all_recipes.extend(res.recipes)
+            if hasattr(res, "unparsed") and res.unparsed:
+                all_unparsed.extend(res.unparsed)
+    return all_recipes, all_unparsed

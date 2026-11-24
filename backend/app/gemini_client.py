@@ -27,11 +27,12 @@ Rules:
 
 _ONENOTE_EXTRACTION_PROMPT = """
 You are migrating recipes from a Microsoft OneNote export.
-Extract ALL distinct recipes found in the provided document text.
+Extract ALL distinct recipes found in the provided document text into 'recipes'.
+If you encounter sections that appear to be recipe attempts, food notes, or cooking ideas that are incomplete, lacking clear ingredients, or cannot be fully structured, include them in 'unparsed' with their title, reason, and raw text excerpt so the user can manually review and complete them.
 Rules:
 - Preserve each recipe's original language ('he' for Hebrew, 'en' for English).
-- Ignore empty headings, navigation boilerplate, or non-recipe notes unless they are cooking notes belonging to a recipe.
-- Suggest category, dietary tags, and helpful tags for each recipe.
+- Ignore completely unrelated non-food notes (e.g. passwords, shopping lists, meeting minutes).
+- Suggest category, dietary tags, and helpful tags for each structured recipe.
 """.strip()
 
 
@@ -159,11 +160,10 @@ class GeminiRecipeService:
             except Exception:  # noqa: BLE001 - best-effort cleanup of remote temporary file
                 pass
 
-    def extract_from_onenote_text(self, document_text: str) -> list[ExtractedRecipe]:
-        """Extract one or more structured recipes from an exported OneNote document."""
+    def extract_from_onenote_text(self, document_text: str) -> BatchExtractedRecipes:
+        """Extract structured recipes and unparsed candidates from an exported OneNote document."""
         prompt = f"{_ONENOTE_EXTRACTION_PROMPT}\n\nDocument text:\n{document_text.strip()}"
-        result = self._generate_structured(prompt, BatchExtractedRecipes)
-        return result.recipes
+        return self._generate_structured(prompt, BatchExtractedRecipes)
 
     def translate_recipe(self, recipe: ExtractedRecipe, target_language: LanguageCode) -> ExtractedRecipe:
         """Translate a structured recipe into Hebrew ('he') or English ('en')."""

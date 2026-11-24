@@ -35,10 +35,19 @@ class ExtractedRecipe(BaseModel):
     thumbnailUrl: str | None = None
 
 
+class UnparsedCandidate(BaseModel):
+    """A recipe candidate or section in the OneNote document that could not be fully structured."""
+
+    title: str = Field(default="Untitled note", description="Title or heading of the incomplete section.")
+    reason: str = Field(default="Incomplete recipe details", description="Reason why it could not be structured automatically.")
+    rawText: str = Field(default="", description="The raw text snippet so the user can review and edit it manually.")
+
+
 class BatchExtractedRecipes(BaseModel):
     """Container schema used when parsing OneNote documents containing multiple recipes."""
 
     recipes: list[ExtractedRecipe] = Field(default_factory=list)
+    unparsed: list[UnparsedCandidate] = Field(default_factory=list)
 
 
 class ExtractReelRequest(BaseModel):
@@ -75,4 +84,5 @@ class OneNoteParseResponse(BaseModel):
     """Response returned by /api/parse-onenote."""
 
     filename: str
-    recipes: list[ExtractedRecipe]
+    recipes: list[ExtractedRecipe] = Field(default_factory=list)
+    unparsed: list[UnparsedCandidate] = Field(default_factory=list)
