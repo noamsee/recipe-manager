@@ -11,7 +11,13 @@ import {
   saveAppConfig,
 } from './config.js?v=5';
 import { isWakeLockActive, setWakeLockEnabled } from './cook-mode.js?v=5';
-import { downloadTextFile, recipesToJson, recipesToMarkdown } from './export.js?v=5';
+import {
+  downloadTextFile,
+  exportRecipesToPdf,
+  filterRecipesForExport,
+  recipesToJson,
+  recipesToMarkdown,
+} from './export.js?v=6';
 import {
   logoutUser,
   registerWithEmail,
@@ -72,6 +78,8 @@ const state = {
   editingRecipeId: null,
   pendingThumbnailDataUri: '',
   pendingOneNoteRecipes: [],
+  pendingOneNoteUnparsed: [],
+  pendingOneNoteFailed: [],
   filters: { search: '', category: 'ALL', language: 'ALL', dietary: 'ALL' },
   importQueue: [],
   importLogs: [],
@@ -121,6 +129,9 @@ function switchView(viewName) {
     refreshImportQueue().catch(console.warn);
     refreshImportLogs().catch(console.warn);
   }
+  if (viewName === 'settings') {
+    updateExportFilterOptions();
+  }
 }
 
 function updateWakeLockButton(isOn, msg = '') {
@@ -135,6 +146,7 @@ async function refreshLibrary() {
   if (!state.user) return;
   state.recipes = await loadUserRecipes(state.user.uid);
   populateCategoryFilter();
+  updateExportFilterOptions();
   renderRecipeGrid();
 }
 
@@ -423,27 +435,233 @@ function renderShoppingList() {
 
 function renderOneNotePreview() {
   const container = $('onenote-preview-list');
-  container.innerHTML = '';
-  if (!state.pendingOneNoteRecipes.length) {
-    $('onenote-save-btn').hidden = true;
-    return;
+  const previewCard = $('onenote-preview-card');
+  const countEl = $('onenote-preview-count');
+  const saveBtn = $('onenote-save-btn');
+  const unparsedCard = $('onenote-unparsed-card');
+  const unparsedList = $('onenote-unparsed-list');
+  const failedCard = $('onenote-failed-card');
+  const failedList = $('onenote-failed-list');
+
+  // 1. Parsed candidate recipes
+  if (container) container.innerHTML = '';
+  const recipes = state.pendingOneNoteRecipes || [];
+  if (previewCard) previewCard.hidden = recipes.length === 0;
+  if (saveBtn) saveBtn.hidden = recipes.length === 0;
+  if (countEl) countEl.textContent = `Parsed Recipes (${recipes.length})`;
+
+  if (container && recipes.length > 0) {
+    recipes.forEach((recipe, idx) => {
+      const card = document.createElement('div');
+      card.className = 'onenote-pick-card';
+      applyDirection(card, recipe.title, recipe.language);
+
+      const dietaryChips = (recipe.dietary || [])
+        .map((d) => `<span class="chip chip-dietary">${escapeHtml(d)}</span>`)
+        .join(' ');
+
+      card.innerHTML = `
+        <input type="checkbox" class="onenote-pick" data-idx="${idx}" checked />
+        <div class="stack" style="gap: 0.25rem; flex: 1;">
+          <div class="row between">
+            <strong>${escapeHtml(recipe.title)}</strong>
+            <div class="row">
+              <span class="chip">${escapeHtml(recipe.language || 'en')}</span>
+              <span class="chip">${escapeHtml(recipe.category || 'Other')}</span>
+            </div>
+          </div>
+          <div class="muted small">
+            ${(recipe.ingredients || []).length} ingredients &bull; ${(recipe.steps || []).length} steps
+            ${dietaryChips ? `&bull; ${dietaryChips}` : ''}
+          </div>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+    updateOneNoteSaveBtnText();
   }
 
-  $('onenote-save-btn').hidden = false;
-  state.pendingOneNoteRecipes.forEach((recipe, idx) => {
-    const row = document.createElement('div');
-    row.className = 'preview-item';
-    applyDirection(row, recipe.title, recipe.language);
-    row.innerHTML = `
-      <label>
-        <input type="checkbox" class="onenote-pick" data-idx="${idx}" checked />
-        <strong>${escapeHtml(recipe.title)}</strong>
-        <span class="chip">${escapeHtml(recipe.language)}</span>
-        <span class="chip">${(recipe.ingredients || []).length} ingredients</span>
-      </label>
-    `;
-    container.appendChild(row);
+  // 2. Unparsed / Incomplete sections
+  const unparsed = state.pendingOneNoteUnparsed || [];
+  if (unparsedCard) unparsedCard.hidden = unparsed.length === 0;
+  if (unparsedList) {
+    unparsedList.innerHTML = '';
+    unparsed.forEach((item, idx) => {
+      const card = document.createElement('div');
+      card.className = 'queue-item-card';
+      card.style.borderColor = '#f59e0b';
+      card.style.background = '#fffbeb';
+
+      card.innerHTML = `
+        <div class="queue-item-header">
+          <strong>${escapeHtml(item.title || 'Untitled note')}</strong>
+          <span class="chip chip-cooldown">${escapeHtml(item.reason || 'Incomplete')}</span>
+        </div>
+        ${item.rawText ? `<div class="queue-error-preview" style="color: #92400e; background: rgba(245,158,11,0.1);">${escapeHtml(item.rawText.slice(0, 250))}...</div>` : ''}
+        <div class="queue-actions">
+          <button type="button" class="btn-primary btn-sm" data-action="manual-review" data-idx="${idx}">Review &amp; Add Manually</button>
+          <button type="button" class="btn-ghost btn-sm" data-action="dismiss-unparsed" data-idx="${idx}">Dismiss</button>
+        </div>
+      `;
+
+      card.querySelector('[data-action="manual-review"]')?.addEventListener('click', () => {
+        openManualEditorWithCandidate(item);
+        state.pendingOneNoteUnparsed.splice(idx, 1);
+        renderOneNotePreview();
+      });
+
+      card.querySelector('[data-action="dismiss-unparsed"]')?.addEventListener('click', () => {
+        state.pendingOneNoteUnparsed.splice(idx, 1);
+        renderOneNotePreview();
+      });
+
+      unparsedList.appendChild(card);
+    });
+  }
+
+  // 3. Failed to save items
+  const failed = state.pendingOneNoteFailed || [];
+  if (failedCard) failedCard.hidden = failed.length === 0;
+  if (failedList) {
+    failedList.innerHTML = '';
+    failed.forEach((item, idx) => {
+      const card = document.createElement('div');
+      card.className = 'queue-item-card unparsable';
+      card.innerHTML = `
+        <div class="queue-item-header">
+          <strong>${escapeHtml(item.title || 'Untitled recipe')}</strong>
+          <span class="chip chip-unparsable">Save Failed</span>
+        </div>
+        <div class="queue-error-preview">${escapeHtml(item.error || 'Failed saving to library')}</div>
+        <div class="queue-actions">
+          <button type="button" class="btn-primary btn-sm" data-action="manual-review-failed" data-idx="${idx}">Review &amp; Add Manually</button>
+          <button type="button" class="btn-ghost btn-sm" data-action="dismiss-failed" data-idx="${idx}">Dismiss</button>
+        </div>
+      `;
+
+      card.querySelector('[data-action="manual-review-failed"]')?.addEventListener('click', () => {
+        openManualEditorWithCandidate(item.recipe || item);
+        state.pendingOneNoteFailed.splice(idx, 1);
+        renderOneNotePreview();
+      });
+
+      card.querySelector('[data-action="dismiss-failed"]')?.addEventListener('click', () => {
+        state.pendingOneNoteFailed.splice(idx, 1);
+        renderOneNotePreview();
+      });
+
+      failedList.appendChild(card);
+    });
+  }
+}
+
+function updateOneNoteSaveBtnText() {
+  const checked = document.querySelectorAll('.onenote-pick:checked').length;
+  const btn = $('onenote-save-btn');
+  if (btn) btn.textContent = `Import Selected Recipes (${checked})`;
+}
+
+function openManualEditorWithCandidate(candidate) {
+  state.editingRecipeId = null;
+  state.selectedRecipeId = null;
+  state.pendingThumbnailDataUri = '';
+
+  $('editor-heading').textContent = 'Review & Add Recipe Manually';
+  $('edit-title').value = candidate.title || '';
+  $('edit-language').value = candidate.language === 'he' ? 'he' : 'en';
+  $('edit-category').value = candidate.category || 'Main';
+  $('edit-servings').value = candidate.servings || '';
+  $('edit-prep').value = candidate.prepTimeMinutes || '';
+  $('edit-cook').value = candidate.cookTimeMinutes || '';
+  $('edit-source-url').value = candidate.sourceUrl || '';
+  $('edit-tags').value = Array.isArray(candidate.tags) ? candidate.tags.join(', ') : '';
+
+  // Dietary
+  document.querySelectorAll('input[name="edit-dietary"]').forEach((cb) => {
+    cb.checked = Array.isArray(candidate.dietary) && candidate.dietary.includes(cb.value);
   });
+
+  // Ingredients & steps
+  const ingText = (candidate.ingredients || [])
+    .map((i) => {
+      if (typeof i === 'string') return i;
+      const qty = [i.amount, i.unit].filter(Boolean).join(' ');
+      return `${qty ? `${qty} ` : ''}${i.name || ''}`.trim();
+    })
+    .filter(Boolean)
+    .join('\n');
+  $('edit-ingredients').value = ingText;
+
+  const stepText = Array.isArray(candidate.steps)
+    ? candidate.steps.join('\n')
+    : '';
+  $('edit-steps').value = stepText;
+
+  $('edit-notes').value = candidate.notes || candidate.rawText || candidate.reason || '';
+
+  $('edit-thumb-preview').hidden = true;
+  $('edit-thumb-file').value = '';
+
+  switchView('editor');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  showToast('Recipe pre-filled in editor. Review ingredients and click Save Recipe.');
+}
+
+function getExportFilters() {
+  return {
+    category: $('export-filter-category')?.value || 'ALL',
+    dietary: $('export-filter-dietary')?.value || 'ALL',
+    tag: $('export-filter-tag')?.value || 'ALL',
+    language: $('export-filter-language')?.value || 'ALL',
+  };
+}
+
+function updateExportFilterOptions() {
+  const catSelect = $('export-filter-category');
+  const tagSelect = $('export-filter-tag');
+  if (!catSelect || !tagSelect) return;
+
+  const currentCat = catSelect.value;
+  const currentTag = tagSelect.value;
+
+  const categories = new Set();
+  const tags = new Set();
+  (state.recipes || []).forEach((r) => {
+    if (r.category && r.category.trim()) categories.add(r.category.trim());
+    if (Array.isArray(r.tags)) {
+      r.tags.forEach((t) => {
+        if (t && t.trim()) tags.add(t.trim());
+      });
+    }
+  });
+
+  catSelect.innerHTML = '<option value="ALL">All Categories</option>';
+  Array.from(categories).sort().forEach((cat) => {
+    const opt = document.createElement('option');
+    opt.value = cat;
+    opt.textContent = cat;
+    catSelect.appendChild(opt);
+  });
+  catSelect.value = categories.has(currentCat) ? currentCat : 'ALL';
+
+  tagSelect.innerHTML = '<option value="ALL">All Tags</option>';
+  Array.from(tags).sort().forEach((t) => {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = `#${t}`;
+    tagSelect.appendChild(opt);
+  });
+  tagSelect.value = tags.has(currentTag) ? currentTag : 'ALL';
+
+  updateExportMatchCount();
+}
+
+function updateExportMatchCount() {
+  const matches = filterRecipesForExport(state.recipes, getExportFilters());
+  const countEl = $('export-match-count');
+  if (countEl) {
+    countEl.textContent = `Matching recipes to export: ${matches.length} (out of ${state.recipes.length} total in library)`;
+  }
 }
 
 function bindEvents() {
@@ -578,6 +796,12 @@ function bindEvents() {
     } finally {
       btn.disabled = false;
     }
+  });
+
+  $('detail-pdf-btn')?.addEventListener('click', () => {
+    const recipe = state.recipes.find((r) => r.id === state.selectedRecipeId);
+    if (!recipe) return showToast('Recipe not found', true);
+    exportRecipesToPdf([recipe], { title: recipe.title });
   });
 
   // Editor form
@@ -1270,10 +1494,14 @@ function bindEvents() {
     if (!file) return showToast('Select an exported OneNote .html, .docx, or .pdf file.', true);
     $('onenote-status').textContent = 'Uploading & parsing via Gemini...';
     try {
-      state.pendingOneNoteRecipes = await extractRecipesFromOneNoteFile(file, (msg) => {
+      const result = await extractRecipesFromOneNoteFile(file, (msg) => {
         $('onenote-status').textContent = msg;
       });
-      $('onenote-status').textContent = `Found ${state.pendingOneNoteRecipes.length} recipe(s).`;
+      state.pendingOneNoteRecipes = result.recipes || [];
+      state.pendingOneNoteUnparsed = result.unparsed || [];
+      state.pendingOneNoteFailed = [];
+      const unparsedCount = state.pendingOneNoteUnparsed.length;
+      $('onenote-status').textContent = `Parsed ${state.pendingOneNoteRecipes.length} recipe(s)${unparsedCount ? ` (${unparsedCount} incomplete/unparsed note(s) to review)` : ''}.`;
       renderOneNotePreview();
     } catch (err) {
       $('onenote-status').textContent = err.message;
@@ -1281,23 +1509,114 @@ function bindEvents() {
     }
   });
 
+  $('onenote-select-all-btn')?.addEventListener('click', () => {
+    document.querySelectorAll('.onenote-pick').forEach((cb) => (cb.checked = true));
+    updateOneNoteSaveBtnText();
+  });
+
+  $('onenote-deselect-all-btn')?.addEventListener('click', () => {
+    document.querySelectorAll('.onenote-pick').forEach((cb) => (cb.checked = false));
+    updateOneNoteSaveBtnText();
+  });
+
+  $('onenote-preview-list')?.addEventListener('change', (e) => {
+    if (e.target.classList.contains('onenote-pick')) {
+      updateOneNoteSaveBtnText();
+    }
+  });
+
   $('onenote-save-btn').addEventListener('click', async () => {
     const selectedIndices = Array.from(document.querySelectorAll('.onenote-pick:checked')).map((cb) =>
       Number(cb.dataset.idx)
     );
+    if (!selectedIndices.length) {
+      return showToast('No recipes selected to import.', true);
+    }
+
+    $('onenote-save-btn').disabled = true;
+    $('onenote-status').textContent = `Importing ${selectedIndices.length} recipe(s)...`;
+
     let saved = 0;
-    for (const idx of selectedIndices) {
-      const recipe = state.pendingOneNoteRecipes[idx];
-      if (recipe) {
+    let skipped = 0;
+    let failed = 0;
+    const sessionLogDetails = [];
+    const remainingRecipes = [];
+
+    // Map existing recipe titles for deduplication (prevent overwrites)
+    const existingTitles = new Set(
+      state.recipes.map((r) => (r.title || '').trim().toLowerCase()).filter(Boolean)
+    );
+
+    for (let i = 0; i < state.pendingOneNoteRecipes.length; i += 1) {
+      const recipe = state.pendingOneNoteRecipes[i];
+      if (!selectedIndices.includes(i)) {
+        remainingRecipes.push(recipe);
+        continue;
+      }
+
+      const normTitle = (recipe.title || '').trim().toLowerCase();
+      if (normTitle && existingTitles.has(normTitle)) {
+        skipped += 1;
+        sessionLogDetails.push({
+          url: recipe.sourceUrl || `OneNote:${recipe.title}`,
+          status: 'skipped',
+          title: recipe.title,
+          message: `Recipe already exists ("${recipe.title}") - skipped to prevent overwrite.`,
+          timestamp: Date.now(),
+        });
+        continue;
+      }
+
+      try {
         await saveRecipe(state.user.uid, recipe);
         saved += 1;
+        if (normTitle) existingTitles.add(normTitle);
+        sessionLogDetails.push({
+          url: recipe.sourceUrl || `OneNote:${recipe.title}`,
+          status: 'saved',
+          title: recipe.title,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        failed += 1;
+        state.pendingOneNoteFailed.push({
+          title: recipe.title,
+          error: err.message,
+          recipe,
+        });
+        sessionLogDetails.push({
+          url: recipe.sourceUrl || `OneNote:${recipe.title}`,
+          status: 'failed',
+          title: recipe.title,
+          message: err.message,
+          timestamp: Date.now(),
+        });
       }
     }
-    state.pendingOneNoteRecipes = [];
+
+    // Record session execution log in Firestore importLogs
+    try {
+      await saveImportSessionLog(state.user.uid, {
+        totalUrls: selectedIndices.length,
+        savedCount: saved,
+        skippedCount: skipped,
+        failedCount: failed,
+        unparsableCount: (state.pendingOneNoteUnparsed || []).length,
+        summaryText: `OneNote import: ${saved} saved, ${skipped} skipped (already existed), ${failed} failed.`,
+        details: sessionLogDetails,
+      });
+    } catch (logErr) {
+      console.warn('Failed saving OneNote import log:', logErr);
+    }
+
+    state.pendingOneNoteRecipes = remainingRecipes;
     renderOneNotePreview();
     await refreshLibrary();
-    showToast(`Imported ${saved} OneNote recipe(s)!`);
-    switchView('library');
+    await refreshImportLogs();
+
+    $('onenote-save-btn').disabled = false;
+    $('onenote-status').textContent = `Finished: ${saved} saved, ${skipped} skipped (already in library), ${failed} failed.`;
+    showToast(`OneNote import: ${saved} saved, ${skipped} skipped, ${failed} failed.`);
   });
 
   // Shopping list actions
@@ -1322,11 +1641,30 @@ function bindEvents() {
     showToast('Settings saved on this device.');
   });
 
-  $('export-json-btn').addEventListener('click', () => {
-    downloadTextFile('recipes-backup.json', recipesToJson(state.recipes), 'application/json');
+  // Export filters changes
+  ['export-filter-category', 'export-filter-dietary', 'export-filter-tag', 'export-filter-language'].forEach((id) => {
+    $(id)?.addEventListener('change', updateExportMatchCount);
   });
-  $('export-md-btn').addEventListener('click', () => {
-    downloadTextFile('recipes-backup.md', recipesToMarkdown(state.recipes), 'text/markdown');
+
+  // Export actions
+  $('export-pdf-btn')?.addEventListener('click', () => {
+    const matches = filterRecipesForExport(state.recipes, getExportFilters());
+    if (!matches.length) return showToast('No matching recipes to export.', true);
+    exportRecipesToPdf(matches, { title: 'Recipe Manager Cookbook' });
+  });
+
+  $('export-md-btn')?.addEventListener('click', () => {
+    const matches = filterRecipesForExport(state.recipes, getExportFilters());
+    if (!matches.length) return showToast('No matching recipes to export.', true);
+    downloadTextFile('recipes-export.md', recipesToMarkdown(matches), 'text/markdown');
+    showToast(`Exported ${matches.length} recipe(s) to Markdown!`);
+  });
+
+  $('export-json-btn')?.addEventListener('click', () => {
+    const matches = filterRecipesForExport(state.recipes, getExportFilters());
+    if (!matches.length) return showToast('No matching recipes to export.', true);
+    downloadTextFile('recipes-export.json', recipesToJson(matches), 'application/json');
+    showToast(`Exported ${matches.length} recipe(s) to JSON!`);
   });
 }
 

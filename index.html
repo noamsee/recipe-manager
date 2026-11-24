@@ -33,7 +33,7 @@
   <meta name="twitter:description" content="Your bilingual Hebrew & English kitchen library. Extract recipes from Instagram & Facebook Reels, WhatsApp chats, and OneNote." />
   <meta name="twitter:image" content="https://noamsee.github.io/recipe-manager/assets/og-preview.png?v=2" />
 
-  <link rel="stylesheet" href="css/styles.css?v=6" />
+  <link rel="stylesheet" href="css/styles.css?v=7" />
 </head>
 <body>
   <div id="toast" class="toast" hidden></div>
@@ -107,6 +107,7 @@
           <div class="row wrap">
             <button id="wake-lock-btn" type="button" class="btn-secondary" data-active="false">Cook Mode: Keep Screen Awake</button>
             <button id="detail-translate-btn" type="button" class="btn-secondary">Translate</button>
+            <button id="detail-pdf-btn" type="button" class="btn-secondary">Print / PDF</button>
             <button id="detail-shopping-btn" type="button" class="btn-secondary">+ Shopping List</button>
             <button id="detail-share-btn" type="button" class="btn-secondary">Share Link</button>
             <button id="detail-edit-btn" type="button" class="btn-secondary">Edit</button>
@@ -307,8 +308,41 @@
             </label>
             <button id="onenote-parse-btn" type="button" class="btn-primary">Parse OneNote File</button>
             <p id="onenote-status" class="muted"></p>
-            <div id="onenote-preview-list" class="stack"></div>
-            <button id="onenote-save-btn" type="button" class="btn-primary" hidden>Import Selected Recipes</button>
+
+            <!-- Parsed Recipes Preview -->
+            <div id="onenote-preview-card" class="stack" hidden>
+              <div class="row between">
+                <strong id="onenote-preview-count">Parsed Recipes (0)</strong>
+                <div class="row">
+                  <button id="onenote-select-all-btn" type="button" class="btn-ghost btn-sm">Select All</button>
+                  <button id="onenote-deselect-all-btn" type="button" class="btn-ghost btn-sm">Deselect All</button>
+                </div>
+              </div>
+              <div id="onenote-preview-list" class="stack"></div>
+              <button id="onenote-save-btn" type="button" class="btn-primary" hidden>Import Selected Recipes</button>
+            </div>
+
+            <!-- Incomplete / Unparsed Notes Card -->
+            <div id="onenote-unparsed-card" class="stack" hidden>
+              <div class="card-header-row">
+                <div>
+                  <h3 class="subheading">⚠️ Incomplete / Unparsed Sections</h3>
+                  <p class="muted small">These sections couldn't be automatically structured into recipes. You can review and manually complete them below.</p>
+                </div>
+              </div>
+              <div id="onenote-unparsed-list" class="queue-list stack"></div>
+            </div>
+
+            <!-- Failed Save Errors (if any during save) -->
+            <div id="onenote-failed-card" class="stack" hidden>
+              <div class="card-header-row">
+                <div>
+                  <h3 class="subheading">❌ Failed to Save</h3>
+                  <p class="muted small">These recipes encountered an error while saving to your library. You can review them manually.</p>
+                </div>
+              </div>
+              <div id="onenote-failed-list" class="queue-list stack"></div>
+            </div>
           </div>
 
           <div id="pane-paste-text" class="stack" hidden>
@@ -347,10 +381,52 @@
       <section id="view-settings" hidden>
         <div class="panel stack">
           <h2>Backup &amp; Export</h2>
-          <p class="muted">Download a portable copy of all your recipes anytime.</p>
+          <p class="muted">Export your full library or filter by sections/labels. The PDF export generates a formatted, printable cookbook including photos, with full Hebrew (RTL) &amp; English support.</p>
+          
+          <div class="export-filter-box stack">
+            <div class="grid-2">
+              <label>
+                Filter by Section / Category
+                <select id="export-filter-category">
+                  <option value="ALL">All Categories</option>
+                </select>
+              </label>
+              <label>
+                Filter by Dietary Label
+                <select id="export-filter-dietary">
+                  <option value="ALL">All Dietary Labels</option>
+                  <option value="meat">Meat</option>
+                  <option value="dairy">Dairy</option>
+                  <option value="parve">Parve</option>
+                  <option value="vegan">Vegan</option>
+                  <option value="vegetarian">Vegetarian</option>
+                  <option value="gluten-free">Gluten-Free</option>
+                </select>
+              </label>
+            </div>
+            <div class="grid-2">
+              <label>
+                Filter by Custom Tag
+                <select id="export-filter-tag">
+                  <option value="ALL">All Tags</option>
+                </select>
+              </label>
+              <label>
+                Filter by Language
+                <select id="export-filter-language">
+                  <option value="ALL">All Languages</option>
+                  <option value="he">Hebrew (עברית)</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+            </div>
+            <p id="export-match-count" class="muted small">Matching recipes: 0</p>
+          </div>
+
           <div class="row wrap">
-            <button id="export-json-btn" type="button" class="btn-secondary">Export All as JSON</button>
-            <button id="export-md-btn" type="button" class="btn-secondary">Export All as Markdown</button>
+            <button id="export-pdf-btn" type="button" class="btn-primary">Export as PDF (with Photos)</button>
+            <button id="export-md-btn" type="button" class="btn-secondary">Export as Markdown</button>
+            <button id="export-json-btn" type="button" class="btn-secondary">Export as JSON</button>
           </div>
           <hr />
           <h2>Extraction Server Settings</h2>
@@ -366,6 +442,6 @@
     </main>
   </div>
 
-  <script type="module" src="js/app.js?v=6"></script>
+  <script type="module" src="js/app.js?v=7"></script>
 </body>
 </html>

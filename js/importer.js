@@ -325,5 +325,9 @@ export async function extractRecipesFromOneNoteFile(file, onStatus = null) {
   await wakeBackend(onStatus);
   if (onStatus) onStatus(`Parsing "${file.name}" via Gemini...`);
   const payload = await parseOneNoteFile(file);
-  return payload.recipes || [];
+  return {
+    recipes: payload.recipes || [],
+    unparsed: payload.unparsed || [],
+    filename: payload.filename || file.name,
+  };
 }
