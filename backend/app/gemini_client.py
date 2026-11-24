@@ -23,16 +23,25 @@ Rules:
 - Suggest concise category (e.g. Main, Dessert, Salad, Soup, Breakfast, Baking, Side, Drink),
   relevant dietary tags from [meat, dairy, parve, vegan, vegetarian, gluten-free], and 2-6 helpful tags.
 - If prep time, cook time, or servings are not stated, return null for those fields.
+- Set source='Reel'.
 """.strip()
 
 _ONENOTE_EXTRACTION_PROMPT = """
 You are migrating recipes from a Microsoft OneNote export.
 Extract ALL distinct recipes found in the provided document text into 'recipes'.
 If you encounter sections that appear to be recipe attempts, food notes, or cooking ideas that are incomplete, lacking clear ingredients, or cannot be fully structured, include them in 'unparsed' with their title, reason, and raw text excerpt so the user can manually review and complete them.
-Rules:
-- Preserve each recipe's original language ('he' for Hebrew, 'en' for English).
+
+CRITICAL LANGUAGE PRESERVATION RULES:
+- NEVER translate a Hebrew recipe into English!
+- If the source text contains Hebrew words or sentences, return language='he' and write title, ingredient names, amounts, units, groups, steps, category, and notes strictly in HEBREW.
+- If the source text is in English, return language='en'.
+- Do NOT translate ingredients or instructions. Preserve the original language verbatim.
+
+SOURCE & TAG RULES:
+- Always set source='OneNote'.
+- Always include 'OneNote' in the tags list.
 - Ignore completely unrelated non-food notes (e.g. passwords, shopping lists, meeting minutes).
-- Suggest category, dietary tags, and helpful tags for each structured recipe.
+- Suggest concise category, dietary tags from [meat, dairy, parve, vegan, vegetarian, gluten-free], and 2-6 helpful tags.
 """.strip()
 
 
@@ -78,6 +87,7 @@ class GeminiRecipeService:
                             response_mime_type="application/json",
                             response_schema=schema,
                             temperature=0.1,
+                            max_output_tokens=8192,
                         ),
                     )
                     if getattr(response, "parsed", None) is not None:

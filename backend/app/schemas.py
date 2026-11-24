@@ -33,6 +33,7 @@ class ExtractedRecipe(BaseModel):
     notes: str = Field(default="")
     sourceUrl: str | None = None
     thumbnailUrl: str | None = None
+    source: str = Field(default="Manual")
 
 
 class UnparsedCandidate(BaseModel):

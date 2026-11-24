@@ -69,5 +69,36 @@ def test_pdf_without_text_raises_clear_error() -> None:
     # simulate a large blank/image PDF (> 50KB)
     content = buf.getvalue() + (b"0" * 60_000)
 
-    with pytest.raises(UnsupportedFileFormatError, match="No selectable text"):
+    with pytest.raises(UnsupportedFileFormatError, match="No selectable text|No readable text"):
         extract_text_from_onenote_bytes("scanned.pdf", content)
+
+
+def test_compress_image_bytes_produces_valid_data_uri() -> None:
+    from PIL import Image
+    from app.onenote_parser import compress_image_bytes
+
+    img = Image.new("RGB", (200, 200), color="blue")
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+
+    data_uri = compress_image_bytes(buf.getvalue())
+    assert data_uri.startswith("data:image/jpeg;base64,")
+    assert len(data_uri) > 50
+
+
+def test_group_pdf_pages_into_units_combines_short_pages() -> None:
+    from app.onenote_parser import group_pdf_pages_into_units
+
+    pages = [
+        {"page_num": 1, "text": "Chocolate Cake\n200g flour", "image_data_uri": "data:img1"},
+        {"page_num": 2, "text": "1. Mix ingredients\n2. Bake 30 mins", "image_data_uri": ""},
+        {"page_num": 3, "text": "Tomato Soup\n4 tomatoes", "image_data_uri": "data:img2"},
+    ]
+
+    units = group_pdf_pages_into_units(pages)
+    assert len(units) == 2
+    assert units[0]["pages"] == [1, 2]
+    assert "Mix ingredients" in units[0]["text"]
+    assert units[0]["image_data_uri"] == "data:img1"
+    assert units[1]["pages"] == [3]
+    assert units[1]["image_data_uri"] == "data:img2"
