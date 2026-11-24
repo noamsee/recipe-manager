@@ -80,8 +80,45 @@ export async function loadUserRecipes(ownerUid) {
 
   return recipes.map((r) => ({
     ...r,
+    source: r.source || (r.sourceUrl ? 'Reel' : (r.tags?.includes('OneNote') ? 'OneNote' : 'Reel')),
     thumbnailDataUri: thumbMap.get(r.id) || r.thumbnailUrl || '',
   }));
+}
+
+/**
+ * Update all existing user recipes in Firestore that lack a source field to source: 'Reel'.
+ * Per user request: all existing recipes in the library are from Reel.
+ *
+ * @param {string} ownerUid
+ * @returns {Promise<number>} Number of migrated recipes
+ */
+export async function migrateExistingRecipesSource(ownerUid) {
+  if (!ownerUid) return 0;
+  const { db } = getFirebaseServices();
+  const q = query(
+    collection(db, RECIPES_COLLECTION),
+    where('ownerUid', '==', ownerUid)
+  );
+  const snap = await getDocs(q);
+  let migratedCount = 0;
+  const updates = [];
+  snap.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (!data.source) {
+      migratedCount += 1;
+      updates.push(
+        updateDoc(doc(db, RECIPES_COLLECTION, docSnap.id), {
+          source: 'Reel',
+        }).catch((err) => {
+          console.warn(`Failed to migrate source for recipe ${docSnap.id}:`, err);
+        })
+      );
+    }
+  });
+  if (updates.length > 0) {
+    await Promise.all(updates);
+  }
+  return migratedCount;
 }
 
 /**
@@ -94,9 +131,12 @@ export async function saveRecipe(ownerUid, recipeData, existingId = null) {
     : doc(collection(db, RECIPES_COLLECTION));
 
   const thumbnailDataUri = recipeData.thumbnailDataUri || recipeData.thumbnailUrl || '';
+  const source = recipeData.source || (recipeData.sourceUrl ? 'Reel' : (recipeData.tags?.includes('OneNote') ? 'OneNote' : 'Manual'));
+
   const cleanPayload = {
     ownerUid,
     title: (recipeData.title || 'Untitled Recipe').trim(),
+    source,
     language: recipeData.language === 'he' ? 'he' : 'en',
     ingredients: Array.isArray(recipeData.ingredients) ? recipeData.ingredients : [],
     steps: Array.isArray(recipeData.steps) ? recipeData.steps : [],
@@ -178,12 +218,16 @@ export async function loadSharedRecipe(shareId) {
 /**
  * Filter recipes client-side across title, ingredients, tags, dietary, and language.
  */
-export function filterRecipes(recipes, { search = '', category = 'ALL', language = 'ALL', dietary = 'ALL' }) {
+export function filterRecipes(recipes, { search = '', category = 'ALL', language = 'ALL', dietary = 'ALL', source = 'ALL' }) {
   const q = search.trim().toLowerCase();
   return recipes.filter((r) => {
     if (category !== 'ALL' && (r.category || 'Other') !== category) return false;
     if (language !== 'ALL' && (r.language || 'en') !== language) return false;
     if (dietary !== 'ALL' && !(r.dietary || []).includes(dietary)) return false;
+    if (source !== 'ALL') {
+      const rSource = r.source || (r.sourceUrl ? 'Reel' : (r.tags?.includes('OneNote') ? 'OneNote' : 'Manual'));
+      if (rSource !== source) return false;
+    }
     if (!q) return true;
 
     const haystack = [

@@ -20,8 +20,8 @@
   <meta property="og:url" content="https://noamsee.github.io/recipe-manager/" />
   <meta property="og:title" content="Recipe Manager — Bilingual Kitchen Library" />
   <meta property="og:description" content="Your bilingual Hebrew & English kitchen library. Extract recipes from Instagram & Facebook Reels, WhatsApp chats, and OneNote." />
-  <meta property="og:image" content="https://noamsee.github.io/recipe-manager/assets/og-preview.png?v=2" />
-  <meta property="og:image:secure_url" content="https://noamsee.github.io/recipe-manager/assets/og-preview.png?v=2" />
+  <meta property="og:image" content="https://noamsee.github.io/recipe-manager/assets/og-share-card.png?v=3" />
+  <meta property="og:image:secure_url" content="https://noamsee.github.io/recipe-manager/assets/og-share-card.png?v=3" />
   <meta property="og:image:type" content="image/png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
@@ -31,9 +31,9 @@
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="Recipe Manager — Bilingual Kitchen Library" />
   <meta name="twitter:description" content="Your bilingual Hebrew & English kitchen library. Extract recipes from Instagram & Facebook Reels, WhatsApp chats, and OneNote." />
-  <meta name="twitter:image" content="https://noamsee.github.io/recipe-manager/assets/og-preview.png?v=2" />
+  <meta name="twitter:image" content="https://noamsee.github.io/recipe-manager/assets/og-share-card.png?v=3" />
 
-  <link rel="stylesheet" href="css/styles.css?v=7" />
+  <link rel="stylesheet" href="css/styles.css?v=8" />
 </head>
 <body>
   <div id="toast" class="toast" hidden></div>
@@ -95,6 +95,12 @@
             <option value="vegetarian">Vegetarian</option>
             <option value="gluten-free">Gluten-Free</option>
           </select>
+          <select id="filter-source">
+            <option value="ALL">All Sources</option>
+            <option value="Reel">Reel</option>
+            <option value="OneNote">OneNote</option>
+            <option value="Manual">Manual</option>
+          </select>
         </div>
         <p id="recipe-count" class="muted"></p>
         <div id="recipe-grid" class="recipe-grid"></div>
@@ -129,12 +135,19 @@
         <div class="panel">
           <h2 id="editor-heading">New Recipe</h2>
           <form id="editor-form" class="stack">
-            <div class="grid-2">
+            <div class="grid-3">
               <label>Title <input id="edit-title" type="text" required /></label>
               <label>Language
                 <select id="edit-language">
                   <option value="en">English (LTR)</option>
                   <option value="he">Hebrew (RTL)</option>
+                </select>
+              </label>
+              <label>Source
+                <select id="edit-source">
+                  <option value="Manual">Manual</option>
+                  <option value="Reel">Reel</option>
+                  <option value="OneNote">OneNote</option>
                 </select>
               </label>
             </div>
@@ -442,6 +455,6 @@
     </main>
   </div>
 
-  <script type="module" src="js/app.js?v=7"></script>
+  <script type="module" src="js/app.js?v=8"></script>
 </body>
 </html>

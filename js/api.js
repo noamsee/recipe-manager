@@ -42,7 +42,7 @@ async function authedJsonFetch(path, body, onStatus = null) {
   let response;
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 95000); // 95s timeout for video processing
+    const timer = setTimeout(() => controller.abort(), 180000); // 180s timeout for video processing
     response = await fetch(fullUrl, {
       method: 'POST',
       headers: {
@@ -56,7 +56,7 @@ async function authedJsonFetch(path, body, onStatus = null) {
   } catch (netErr) {
     const isTimeout = netErr.name === 'AbortError';
     const detailMsg = isTimeout
-      ? 'Request timed out after 95s. Video downloading/transcription took too long.'
+      ? 'Request timed out after 180s. Video downloading or AI processing took longer than expected. Please retry or use the caption fallback below.'
       : `Network error (${netErr.name}: ${netErr.message}). Check internet or Render backend health.`;
     logApi(`FETCH ERROR: ${detailMsg}`);
     throw new Error(detailMsg);
@@ -153,13 +153,27 @@ export async function parseOneNoteFile(file) {
   form.append('file', file);
 
   logApi(`POST OneNote file: ${file.name} (${file.size} bytes)`);
-  const response = await fetch(`${baseUrl}/api/parse-onenote`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-    body: form,
-  });
+  let response;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 240000); // 240s timeout for large multi-page exports
+    response = await fetch(`${baseUrl}/api/parse-onenote`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: form,
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+  } catch (netErr) {
+    const isTimeout = netErr.name === 'AbortError';
+    const detailMsg = isTimeout
+      ? 'OneNote import timed out after 240s. The file is large; please retry or try importing in smaller sections.'
+      : `Network error (${netErr.name}: ${netErr.message}). Check connection or server health.`;
+    logApi(detailMsg);
+    throw new Error(detailMsg);
+  }
   const rawText = await response.text();
   let payload = {};
   try {

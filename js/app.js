@@ -57,8 +57,9 @@ import {
   deleteRecipeById,
   filterRecipes,
   loadUserRecipes,
+  migrateExistingRecipesSource,
   saveRecipe,
-} from './recipes.js?v=5';
+} from './recipes.js?v=6';
 import { applyDirection } from './rtl.js?v=5';
 import {
   addShoppingItems,
@@ -80,7 +81,7 @@ const state = {
   pendingOneNoteRecipes: [],
   pendingOneNoteUnparsed: [],
   pendingOneNoteFailed: [],
-  filters: { search: '', category: 'ALL', language: 'ALL', dietary: 'ALL' },
+  filters: { search: '', category: 'ALL', language: 'ALL', dietary: 'ALL', source: 'ALL' },
   importQueue: [],
   importLogs: [],
   isBatchRunning: false,
@@ -144,6 +145,8 @@ function updateWakeLockButton(isOn, msg = '') {
 
 async function refreshLibrary() {
   if (!state.user) return;
+  // Automatically migrate any legacy recipes without source to source: 'Reel'
+  migrateExistingRecipesSource(state.user.uid).catch(console.warn);
   state.recipes = await loadUserRecipes(state.user.uid);
   populateCategoryFilter();
   updateExportFilterOptions();
@@ -191,14 +194,15 @@ function renderRecipeGrid() {
       ? `<img class="card-thumb" src="${escapeHtml(recipe.thumbnailDataUri)}" alt="${escapeHtml(recipe.title)}" loading="lazy" />`
       : `<div class="card-thumb card-thumb-placeholder">${recipe.language === 'he' ? 'מתכון' : 'Recipe'}</div>`;
 
+    const source = recipe.source || (recipe.sourceUrl ? 'Reel' : (recipe.tags?.includes('OneNote') ? 'OneNote' : 'Manual'));
     const stars = recipe.rating ? '★'.repeat(recipe.rating) + '☆'.repeat(5 - recipe.rating) : '';
     const chips = [
-      recipe.category,
-      recipe.language === 'he' ? 'עברית' : 'EN',
-      ...(recipe.dietary || []).slice(0, 2),
+      `<span class="chip chip-source chip-source-${source.toLowerCase()}">${escapeHtml(source)}</span>`,
+      recipe.category ? `<span class="chip">${escapeHtml(recipe.category)}</span>` : '',
+      `<span class="chip">${recipe.language === 'he' ? 'עברית' : 'EN'}</span>`,
+      ...(recipe.dietary || []).slice(0, 2).map((c) => `<span class="chip">${escapeHtml(c)}</span>`),
     ]
       .filter(Boolean)
-      .map((c) => `<span class="chip">${escapeHtml(c)}</span>`)
       .join('');
 
     card.innerHTML = `
@@ -241,7 +245,9 @@ function openRecipeDetail(recipeId) {
 
   const metaRow = document.createElement('div');
   metaRow.className = 'chip-row';
+  const source = recipe.source || (recipe.sourceUrl ? 'Reel' : (recipe.tags?.includes('OneNote') ? 'OneNote' : 'Manual'));
   const metaChips = [
+    `Source: ${source}`,
     recipe.category,
     recipe.language === 'he' ? 'עברית (RTL)' : 'English (LTR)',
     recipe.servings ? `${recipe.servings} servings` : '',
@@ -252,7 +258,7 @@ function openRecipeDetail(recipeId) {
   ].filter(Boolean);
   for (const label of metaChips) {
     const span = document.createElement('span');
-    span.className = 'chip';
+    span.className = label.startsWith('Source:') ? `chip chip-source chip-source-${source.toLowerCase()}` : 'chip';
     span.textContent = label;
     metaRow.appendChild(span);
   }
@@ -354,6 +360,9 @@ function openRecipeEditor(recipe = null) {
   $('edit-title').value = recipe?.title || '';
   $('edit-language').value = recipe?.language || 'en';
   $('edit-category').value = recipe?.category || 'Main';
+  if ($('edit-source')) {
+    $('edit-source').value = recipe?.source || 'Manual';
+  }
   $('edit-servings').value = recipe?.servings ?? '';
   $('edit-prep').value = recipe?.prepTimeMinutes ?? '';
   $('edit-cook').value = recipe?.cookTimeMinutes ?? '';
@@ -599,6 +608,10 @@ function openManualEditorWithCandidate(candidate) {
 
   $('edit-notes').value = candidate.notes || candidate.rawText || candidate.reason || '';
 
+  if ($('edit-source')) {
+    $('edit-source').value = 'OneNote';
+  }
+
   $('edit-thumb-preview').hidden = true;
   $('edit-thumb-file').value = '';
 
@@ -729,6 +742,10 @@ function bindEvents() {
     state.filters.dietary = e.target.value;
     renderRecipeGrid();
   });
+  $('filter-source')?.addEventListener('change', (e) => {
+    state.filters.source = e.target.value;
+    renderRecipeGrid();
+  });
 
   // Detail actions
   $('detail-back-btn').addEventListener('click', () => switchView('library'));
@@ -840,10 +857,13 @@ function bindEvents() {
       ? state.recipes.find((r) => r.id === state.editingRecipeId)
       : null;
 
+    const sourceVal = $('edit-source')?.value || (existing?.source || 'Manual');
+
     const id = await saveRecipe(
       state.user.uid,
       {
         title: $('edit-title').value,
+        source: sourceVal,
         language: $('edit-language').value,
         category: $('edit-category').value.trim() || 'Other',
         servings: $('edit-servings').value ? Number($('edit-servings').value) : null,
@@ -939,7 +959,11 @@ function bindEvents() {
         if (debugBox) debugBox.hidden = false;
       } else {
         logApi(`Extraction successful. Saving recipe "${result.recipe.title}"...`);
-        const id = await saveRecipe(state.user.uid, result.recipe);
+        const id = await saveRecipe(state.user.uid, {
+          ...result.recipe,
+          source: 'Reel',
+          sourceUrl: result.recipe.sourceUrl || url,
+        });
         statusEl.textContent = `Saved "${result.recipe.title}"!`;
         $('single-reel-url').value = '';
         await refreshLibrary();
@@ -970,7 +994,11 @@ function bindEvents() {
       const recipe = await runCaptionFallbackExtraction(text, sourceUrl, (msg) => {
         $('single-reel-status').textContent = msg;
       });
-      const id = await saveRecipe(state.user.uid, recipe);
+      const id = await saveRecipe(state.user.uid, {
+        ...recipe,
+        source: 'Reel',
+        sourceUrl: sourceUrl || recipe.sourceUrl,
+      });
       $('reel-fallback-box').hidden = true;
       $('fallback-caption-text').value = '';
       await refreshLibrary();
@@ -992,7 +1020,11 @@ function bindEvents() {
       const recipe = await runCaptionFallbackExtraction(text, sourceUrl, (msg) => {
         $('paste-text-status').textContent = msg;
       });
-      const id = await saveRecipe(state.user.uid, recipe);
+      const id = await saveRecipe(state.user.uid, {
+        ...recipe,
+        source: 'Manual',
+        sourceUrl: sourceUrl || recipe.sourceUrl,
+      });
       $('paste-raw-text').value = '';
       $('paste-raw-url').value = '';
       $('paste-text-status').textContent = '';
@@ -1568,7 +1600,11 @@ function bindEvents() {
       }
 
       try {
-        await saveRecipe(state.user.uid, recipe);
+        await saveRecipe(state.user.uid, {
+          ...recipe,
+          source: 'OneNote',
+          tags: recipe.tags?.includes('OneNote') ? recipe.tags : [...(recipe.tags || []), 'OneNote'],
+        });
         saved += 1;
         if (normTitle) existingTitles.add(normTitle);
         sessionLogDetails.push({

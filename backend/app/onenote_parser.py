@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from pathlib import Path
 import base64
+import time
 
 from bs4 import BeautifulSoup
 from docx import Document
@@ -217,34 +218,43 @@ def _extract_single_unit(unit: dict, gemini: GeminiRecipeService) -> tuple[list[
     recipes: list[ExtractedRecipe] = []
     unparsed: list[UnparsedCandidate] = []
 
-    try:
-        res = gemini.extract_from_onenote_text(prompt)
-        items = res.recipes if hasattr(res, "recipes") else (res if isinstance(res, list) else [])
-        for r in items:
-            # Enforce Hebrew language if text was Hebrew
-            if is_hebrew:
-                r.language = "he"
-            # Set source to OneNote
-            r.source = "OneNote"
-            # Add OneNote tag if missing
-            if "OneNote" not in (r.tags or []):
-                r.tags = list(r.tags or []) + ["OneNote"]
-            # Attach photo from this page if available and recipe has none
-            if image_uri and not r.thumbnailUrl:
-                r.thumbnailUrl = image_uri
+    # Try up to 2 attempts with a brief pause if rate-limited (429 / 503)
+    max_attempts = 2
+    for attempt in range(max_attempts):
+        try:
+            res = gemini.extract_from_onenote_text(prompt)
+            items = res.recipes if hasattr(res, "recipes") else (res if isinstance(res, list) else [])
+            for r in items:
+                # Enforce Hebrew language if text was Hebrew
+                if is_hebrew:
+                    r.language = "he"
+                # Set source to OneNote
+                r.source = "OneNote"
+                # Add OneNote tag if missing
+                if "OneNote" not in (r.tags or []):
+                    r.tags = list(r.tags or []) + ["OneNote"]
+                # Attach photo from this page if available and recipe has none
+                if image_uri and not r.thumbnailUrl:
+                    r.thumbnailUrl = image_uri
 
-            recipes.append(r)
+                recipes.append(r)
 
-        if hasattr(res, "unparsed") and res.unparsed:
-            unparsed.extend(res.unparsed)
-    except Exception as exc:
-        # If extraction failed for this specific unit, preserve as unparsed note so user can manually edit
-        first_line = text.splitlines()[0][:60] if text else "OneNote Page"
-        unparsed.append(UnparsedCandidate(
-            title=first_line,
-            reason=f"Extraction error: {str(exc)[:100]}",
-            rawText=text[:400],
-        ))
+            if hasattr(res, "unparsed") and res.unparsed:
+                unparsed.extend(res.unparsed)
+            break
+        except Exception as exc:
+            err_msg = str(exc)
+            if ("429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "503" in err_msg) and attempt + 1 < max_attempts:
+                time.sleep(3.0)
+                continue
+            # If extraction failed for this specific unit, preserve as unparsed note so user can manually edit
+            first_line = text.splitlines()[0][:60] if text else "OneNote Page"
+            unparsed.append(UnparsedCandidate(
+                title=first_line,
+                reason=f"Extraction error: {err_msg[:100]}",
+                rawText=text[:400],
+            ))
+            break
 
     return recipes, unparsed
 
@@ -271,23 +281,21 @@ def parse_pdf_onenote_export(
     all_recipes: list[ExtractedRecipe] = []
     all_unparsed: list[UnparsedCandidate] = []
 
-    # Process units concurrently (up to 4 workers)
-    max_workers = min(4, len(units))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_extract_single_unit, unit, gemini): unit for unit in units}
-        for future in as_completed(futures):
-            try:
-                recipes, unparsed = future.result()
-                all_recipes.extend(recipes)
-                all_unparsed.extend(unparsed)
-            except Exception as e:
-                unit = futures[future]
-                first_line = unit.get("text", "").splitlines()[0][:60] if unit.get("text") else "OneNote Page"
-                all_unparsed.append(UnparsedCandidate(
-                    title=first_line,
-                    reason=f"Unit processing failed: {str(e)[:100]}",
-                    rawText=unit.get("text", "")[:400],
-                ))
+    # Process units sequentially with rate-limit pacing to respect Gemini quotas and maintain page order
+    for idx, unit in enumerate(units):
+        try:
+            recipes, unparsed = _extract_single_unit(unit, gemini)
+            all_recipes.extend(recipes)
+            all_unparsed.extend(unparsed)
+        except Exception as e:
+            first_line = unit.get("text", "").splitlines()[0][:60] if unit.get("text") else "OneNote Page"
+            all_unparsed.append(UnparsedCandidate(
+                title=first_line,
+                reason=f"Unit processing failed: {str(e)[:100]}",
+                rawText=unit.get("text", "")[:400],
+            ))
+        if idx + 1 < len(units):
+            time.sleep(0.8)
 
     return all_recipes, all_unparsed
 

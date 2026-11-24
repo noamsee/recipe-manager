@@ -46,15 +46,21 @@ SOURCE & TAG RULES:
 
 
 VALID_MODELS = (
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
+    "gemini-2.5-pro",
     "gemini-3.5-flash",
     "gemini-3.6-flash",
 )
 
 FALLBACK_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
+    "gemini-2.5-pro",
     "gemini-3.5-flash",
     "gemini-3.6-flash",
 ]
@@ -70,7 +76,7 @@ class GeminiRecipeService:
         self._model = model if model in VALID_MODELS else "gemini-3.5-flash-lite"
 
     def _generate_structured(self, contents: list | str, schema: type[TModel]) -> TModel:
-        initial_model = self._model if self._model in VALID_MODELS else "gemini-3.5-flash-lite"
+        initial_model = self._model if self._model in VALID_MODELS else "gemini-2.5-flash"
         models_to_try = [initial_model] + [m for m in FALLBACK_MODELS if m != initial_model]
         last_error = None
         attempt_log: list[str] = []
@@ -100,8 +106,9 @@ class GeminiRecipeService:
                     err_str = str(exc)
                     attempt_log.append(f"{model_name}[att {attempt + 1}]: {err_str[:100]}")
 
-                    # If quota exhausted (429), break immediately to next model
+                    # If quota exhausted (429), pause 2.0s to allow token/rate bucket to replenish before next try
                     if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower():
+                        time.sleep(2.0)
                         break
 
                     # If 503 or UNAVAILABLE spike on primary, sleep 1.5s before attempt 2

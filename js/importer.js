@@ -224,8 +224,12 @@ export async function processBatchQueue(
           attempts: failureEntry.attempts,
         });
       } else if (outcome.recipe) {
-        // Save extracted recipe to Firestore recipes collection
-        await saveRecipe(ownerUid, outcome.recipe);
+        // Save extracted recipe to Firestore recipes collection with source: 'Reel'
+        await saveRecipe(ownerUid, {
+          ...outcome.recipe,
+          source: 'Reel',
+          sourceUrl: outcome.recipe.sourceUrl || item.url,
+        });
         summary.saved += 1;
         existingMap.set(normUrl, outcome.recipe);
 
