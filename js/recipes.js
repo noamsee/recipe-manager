@@ -350,6 +350,51 @@ export async function loadSharedRecipe(shareId) {
 }
 
 /**
+ * Bulk update specific fields across multiple recipe documents.
+ * @param {string} ownerUid
+ * @param {string[]} recipeIds
+ * @param {Object} partialUpdates
+ * @returns {Promise<number>}
+ */
+export async function bulkUpdateRecipes(ownerUid, recipeIds, partialUpdates) {
+  if (!ownerUid || !Array.isArray(recipeIds) || recipeIds.length === 0) {
+    return 0;
+  }
+  const { db } = getFirebaseServices();
+  const updates = [];
+  for (const id of recipeIds) {
+    const recipeRef = doc(db, RECIPES_COLLECTION, id);
+    const payload = {
+      ...partialUpdates,
+      updatedAt: serverTimestamp(),
+    };
+    updates.push(updateDoc(recipeRef, payload));
+  }
+  await Promise.all(updates);
+  return recipeIds.length;
+}
+
+/**
+ * Bulk delete multiple recipes by ID.
+ * @param {string} ownerUid
+ * @param {string[]} recipeIds
+ * @returns {Promise<number>}
+ */
+export async function bulkDeleteRecipes(ownerUid, recipeIds) {
+  if (!ownerUid || !Array.isArray(recipeIds) || recipeIds.length === 0) {
+    return 0;
+  }
+  const { db } = getFirebaseServices();
+  const deletes = [];
+  for (const id of recipeIds) {
+    deletes.push(deleteDoc(doc(db, RECIPES_COLLECTION, id)));
+    deletes.push(deleteDoc(doc(db, THUMBNAILS_COLLECTION, id)).catch(() => {}));
+  }
+  await Promise.all(deletes);
+  return recipeIds.length;
+}
+
+/**
  * Filter recipes client-side across title, ingredients, tags, dietary, and language.
  */
 export function filterRecipes(recipes, { search = '', category = 'ALL', language = 'ALL', dietary = 'ALL', source = 'ALL' }) {

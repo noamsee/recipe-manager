@@ -33,7 +33,7 @@
   <meta name="twitter:description" content="Your bilingual Hebrew & English kitchen library. Extract recipes from Instagram & Facebook Reels, WhatsApp chats, and OneNote." />
   <meta name="twitter:image" content="https://noamsee.github.io/recipe-manager/assets/og-share-card.png?v=3" />
 
-  <link rel="stylesheet" href="css/styles.css?v=13" />
+  <link rel="stylesheet" href="css/styles.css?v=15" />
   <script src="js/vendor/jszip.min.js"></script>
 </head>
 <body>
@@ -103,7 +103,35 @@
             <option value="Manual">Manual</option>
           </select>
         </div>
-        <p id="recipe-count" class="muted"></p>
+        <div class="library-toolbar-row">
+          <p id="recipe-count" class="muted"></p>
+          <div class="row">
+            <button id="bulk-mode-toggle-btn" type="button" class="btn-secondary btn-sm">
+              ☑️ Select Recipes
+            </button>
+          </div>
+        </div>
+
+        <!-- Floating / Sticky Bulk Actions Bar -->
+        <div id="bulk-actions-bar" class="bulk-actions-bar" hidden>
+          <div class="bulk-actions-left">
+            <span id="bulk-selected-count" class="bulk-count-badge">0 selected</span>
+            <button id="bulk-select-all-btn" type="button" class="btn-ghost btn-sm">Select All Matching</button>
+            <button id="bulk-deselect-all-btn" type="button" class="btn-ghost btn-sm">Clear</button>
+          </div>
+          <div class="bulk-actions-right">
+            <button id="bulk-edit-btn" type="button" class="btn-primary btn-sm">
+              ✏️ Bulk Edit Labels
+            </button>
+            <button id="bulk-delete-btn" type="button" class="btn-danger btn-sm">
+              🗑️ Delete
+            </button>
+            <button id="bulk-exit-btn" type="button" class="btn-ghost btn-sm">
+              ✕ Done
+            </button>
+          </div>
+        </div>
+
         <div id="recipe-grid" class="recipe-grid"></div>
       </section>
 
@@ -560,13 +588,117 @@
               Render Backend API URL
               <input id="settings-api-url" type="url" placeholder="https://recipe-manager-api.onrender.com" />
             </label>
-            <button type="submit" class="btn-primary">Save Settings</button>
+            <button id="settings-save-btn" type="submit" class="btn-primary">Save Settings</button>
           </form>
         </div>
       </section>
     </main>
   </div>
 
-  <script type="module" src="js/app.js?v=13"></script>
+  <!-- Bulk Edit Labels Modal Dialog -->
+  <dialog id="bulk-edit-dialog" class="bulk-modal">
+    <div class="modal-header row between">
+      <h3 id="bulk-edit-modal-title">Bulk Edit Labels</h3>
+      <button type="button" id="bulk-modal-close-btn" class="btn-ghost btn-sm" aria-label="Close">&times;</button>
+    </div>
+    <p class="muted small" style="margin: 0.25rem 0 1rem 0;">
+      Check the box next to any label you want to change. Only checked fields will be updated on the selected recipes.
+    </p>
+
+    <form id="bulk-edit-form" class="stack">
+      <!-- 1. Category -->
+      <div class="bulk-field-group">
+        <label class="bulk-field-header">
+          <input type="checkbox" id="bulk-apply-category" />
+          <strong>Change Category</strong>
+        </label>
+        <div class="bulk-field-content">
+          <input
+            id="bulk-category-input"
+            type="text"
+            list="bulk-category-datalist"
+            placeholder="e.g. תוספות, סלטים, מרקים, Main, Dessert..."
+            disabled
+          />
+          <datalist id="bulk-category-datalist"></datalist>
+        </div>
+      </div>
+
+      <!-- 2. Language -->
+      <div class="bulk-field-group">
+        <label class="bulk-field-header">
+          <input type="checkbox" id="bulk-apply-language" />
+          <strong>Change Language</strong>
+        </label>
+        <div class="bulk-field-content">
+          <select id="bulk-language-select" disabled>
+            <option value="he">Hebrew (עברית - RTL)</option>
+            <option value="en">English (LTR)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 3. Source -->
+      <div class="bulk-field-group">
+        <label class="bulk-field-header">
+          <input type="checkbox" id="bulk-apply-source" />
+          <strong>Change Source</strong>
+        </label>
+        <div class="bulk-field-content">
+          <select id="bulk-source-select" disabled>
+            <option value="OneNote (PDF)">OneNote (PDF)</option>
+            <option value="OneNote">OneNote</option>
+            <option value="Reel">Reel</option>
+            <option value="Manual">Manual</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 4. Dietary Tags -->
+      <div class="bulk-field-group">
+        <label class="bulk-field-header">
+          <input type="checkbox" id="bulk-apply-dietary" />
+          <strong>Update Dietary Tags</strong>
+        </label>
+        <div class="bulk-field-content stack" style="gap: 0.5rem;">
+          <select id="bulk-dietary-mode" disabled style="max-width: 220px;">
+            <option value="replace">Replace all dietary tags with:</option>
+            <option value="add">Add to existing dietary tags:</option>
+          </select>
+          <div class="row wrap" style="gap: 0.75rem;">
+            <label><input type="checkbox" name="bulk-dietary" value="meat" disabled /> Meat</label>
+            <label><input type="checkbox" name="bulk-dietary" value="dairy" disabled /> Dairy</label>
+            <label><input type="checkbox" name="bulk-dietary" value="parve" disabled /> Parve</label>
+            <label><input type="checkbox" name="bulk-dietary" value="vegan" disabled /> Vegan</label>
+            <label><input type="checkbox" name="bulk-dietary" value="vegetarian" disabled /> Vegetarian</label>
+            <label><input type="checkbox" name="bulk-dietary" value="gluten-free" disabled /> Gluten-Free</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. Custom Tags -->
+      <div class="bulk-field-group">
+        <label class="bulk-field-header">
+          <input type="checkbox" id="bulk-apply-tags" />
+          <strong>Add Custom Tags</strong>
+        </label>
+        <div class="bulk-field-content">
+          <input
+            id="bulk-tags-input"
+            type="text"
+            placeholder="Tags to add (comma-separated, e.g. quick, weekend, holiday)"
+            disabled
+          />
+        </div>
+      </div>
+
+      <div class="row between modal-footer" style="margin-top: 1.25rem;">
+        <button type="button" id="bulk-modal-cancel-btn" class="btn-ghost">Cancel</button>
+        <button type="submit" id="bulk-apply-submit-btn" class="btn-primary">Apply Updates</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/app.js?v=15"></script>
 </body>
 </html>

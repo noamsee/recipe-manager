@@ -54,6 +54,8 @@ import {
   createAttemptRecord,
 } from './import-queue-logic.js?v=5';
 import {
+  bulkDeleteRecipes,
+  bulkUpdateRecipes,
   compressImageToDataUri,
   createOrUpdateShareLink,
   deleteRecipeById,
@@ -62,6 +64,7 @@ import {
   migrateExistingRecipesSource,
   saveRecipe,
 } from './recipes.js?v=6';
+import { computeBulkRecipeUpdates } from './bulk-utils.js?v=1';
 import { applyDirection } from './rtl.js?v=5';
 import {
   addShoppingItems,
@@ -85,6 +88,8 @@ const state = {
   pendingOneNoteFailed: [],
   pendingZipRecipes: [],
   filters: { search: '', category: 'ALL', language: 'ALL', dietary: 'ALL', source: 'ALL' },
+  selectedRecipeIds: new Set(),
+  isBulkMode: false,
   importQueue: [],
   importLogs: [],
   isBatchRunning: false,
@@ -176,10 +181,44 @@ function populateCategoryFilter() {
   select.value = categories.includes(current) ? current : 'ALL';
 }
 
+function toggleRecipeSelection(id) {
+  if (state.selectedRecipeIds.has(id)) {
+    state.selectedRecipeIds.delete(id);
+  } else {
+    state.selectedRecipeIds.add(id);
+  }
+  if (state.selectedRecipeIds.size > 0) {
+    state.isBulkMode = true;
+  }
+  renderRecipeGrid();
+}
+
 function renderRecipeGrid() {
   const grid = $('recipe-grid');
   const visible = filterRecipes(state.recipes, state.filters);
-  $('recipe-count').textContent = `${visible.length} of ${state.recipes.length} recipes`;
+  const countEl = $('recipe-count');
+  if (countEl) {
+    countEl.textContent = `${visible.length} of ${state.recipes.length} recipes`;
+  }
+
+  // Update bulk toolbar & actions bar
+  const bulkBar = $('bulk-actions-bar');
+  const bulkSelectedCount = $('bulk-selected-count');
+  const bulkToggleBtn = $('bulk-mode-toggle-btn');
+  const selectedCount = state.selectedRecipeIds.size;
+
+  if (bulkToggleBtn) {
+    bulkToggleBtn.textContent = state.isBulkMode ? 'Done Selecting' : '☑️ Select Recipes';
+    bulkToggleBtn.classList.toggle('btn-primary', state.isBulkMode);
+    bulkToggleBtn.classList.toggle('btn-secondary', !state.isBulkMode);
+  }
+
+  if (bulkBar) {
+    bulkBar.hidden = !state.isBulkMode && selectedCount === 0;
+  }
+  if (bulkSelectedCount) {
+    bulkSelectedCount.textContent = `${selectedCount} selected`;
+  }
 
   if (!visible.length) {
     grid.innerHTML =
@@ -189,8 +228,9 @@ function renderRecipeGrid() {
 
   grid.innerHTML = '';
   for (const recipe of visible) {
+    const isSelected = state.selectedRecipeIds.has(recipe.id);
     const card = document.createElement('article');
-    card.className = 'recipe-card';
+    card.className = `recipe-card ${isSelected ? 'selected' : ''}`;
     applyDirection(card, recipe.title, recipe.language);
 
     const thumbHtml = recipe.thumbnailDataUri
@@ -209,6 +249,9 @@ function renderRecipeGrid() {
       .join('');
 
     card.innerHTML = `
+      <div class="card-select-overlay" ${!state.isBulkMode && selectedCount === 0 ? 'style="display: none;"' : ''}>
+        <input type="checkbox" class="card-select-check" data-id="${recipe.id}" ${isSelected ? 'checked' : ''} aria-label="Select recipe" />
+      </div>
       ${thumbHtml}
       <div class="card-body">
         <h3>${escapeHtml(recipe.title)}</h3>
@@ -219,7 +262,22 @@ function renderRecipeGrid() {
         </div>
       </div>
     `;
-    card.addEventListener('click', () => openRecipeDetail(recipe.id));
+
+    card.addEventListener('click', (e) => {
+      // If clicking directly on or inside the select checkbox
+      if (e.target.classList.contains('card-select-check')) {
+        toggleRecipeSelection(recipe.id);
+        return;
+      }
+      // If in bulk selection mode, clicking anywhere on card toggles selection
+      if (state.isBulkMode || state.selectedRecipeIds.size > 0) {
+        toggleRecipeSelection(recipe.id);
+        return;
+      }
+      // Otherwise, open detail
+      openRecipeDetail(recipe.id);
+    });
+
     grid.appendChild(card);
   }
 }
@@ -834,6 +892,196 @@ function bindEvents() {
   $('filter-source')?.addEventListener('change', (e) => {
     state.filters.source = e.target.value;
     renderRecipeGrid();
+  });
+
+  // Bulk selection and actions
+  $('bulk-mode-toggle-btn')?.addEventListener('click', () => {
+    state.isBulkMode = !state.isBulkMode;
+    if (!state.isBulkMode) {
+      state.selectedRecipeIds.clear();
+    }
+    renderRecipeGrid();
+  });
+
+  $('bulk-select-all-btn')?.addEventListener('click', () => {
+    const visible = filterRecipes(state.recipes, state.filters);
+    visible.forEach((r) => state.selectedRecipeIds.add(r.id));
+    state.isBulkMode = true;
+    renderRecipeGrid();
+  });
+
+  $('bulk-deselect-all-btn')?.addEventListener('click', () => {
+    state.selectedRecipeIds.clear();
+    renderRecipeGrid();
+  });
+
+  $('bulk-exit-btn')?.addEventListener('click', () => {
+    state.isBulkMode = false;
+    state.selectedRecipeIds.clear();
+    renderRecipeGrid();
+  });
+
+  $('bulk-delete-btn')?.addEventListener('click', async () => {
+    const count = state.selectedRecipeIds.size;
+    if (count === 0) return showToast('No recipes selected to delete.', true);
+    const confirmed = confirm(
+      `Are you sure you want to delete ${count} selected recipe(s)? This cannot be undone.`
+    );
+    if (!confirmed) return;
+    try {
+      showToast(`Deleting ${count} recipe(s)...`);
+      await bulkDeleteRecipes(state.user.uid, Array.from(state.selectedRecipeIds));
+      state.selectedRecipeIds.clear();
+      state.isBulkMode = false;
+      await refreshLibrary();
+      showToast(`Deleted ${count} recipe(s).`);
+    } catch (err) {
+      showToast(`Failed to delete recipes: ${err.message}`, true);
+    }
+  });
+
+  $('bulk-edit-btn')?.addEventListener('click', () => {
+    const count = state.selectedRecipeIds.size;
+    if (count === 0) return showToast('Select at least one recipe to edit.', true);
+
+    const dialog = $('bulk-edit-dialog');
+    if (!dialog) return;
+
+    $('bulk-edit-modal-title').textContent = `Bulk Edit Labels (${count} recipes)`;
+
+    // Populate category datalist with existing categories
+    const datalist = $('bulk-category-datalist');
+    if (datalist) {
+      datalist.innerHTML = '';
+      const existingCats = Array.from(
+        new Set(state.recipes.map((r) => r.category || 'Other').filter(Boolean))
+      ).sort();
+      for (const cat of existingCats) {
+        const opt = document.createElement('option');
+        opt.value = cat;
+        datalist.appendChild(opt);
+      }
+    }
+
+    // Reset fields & enable/disable states
+    const form = $('bulk-edit-form');
+    if (form) form.reset();
+
+    $('bulk-category-input').disabled = true;
+    $('bulk-language-select').disabled = true;
+    $('bulk-source-select').disabled = true;
+    $('bulk-dietary-mode').disabled = true;
+    document.querySelectorAll('input[name="bulk-dietary"]').forEach((cb) => (cb.disabled = true));
+    $('bulk-tags-input').disabled = true;
+
+    dialog.showModal();
+  });
+
+  // Bulk Edit Modal field toggle handlers
+  $('bulk-apply-category')?.addEventListener('change', (e) => {
+    $('bulk-category-input').disabled = !e.target.checked;
+    if (e.target.checked) $('bulk-category-input').focus();
+  });
+  $('bulk-apply-language')?.addEventListener('change', (e) => {
+    $('bulk-language-select').disabled = !e.target.checked;
+  });
+  $('bulk-apply-source')?.addEventListener('change', (e) => {
+    $('bulk-source-select').disabled = !e.target.checked;
+  });
+  $('bulk-apply-dietary')?.addEventListener('change', (e) => {
+    const checked = e.target.checked;
+    $('bulk-dietary-mode').disabled = !checked;
+    document.querySelectorAll('input[name="bulk-dietary"]').forEach((cb) => (cb.disabled = !checked));
+  });
+  $('bulk-apply-tags')?.addEventListener('change', (e) => {
+    $('bulk-tags-input').disabled = !e.target.checked;
+    if (e.target.checked) $('bulk-tags-input').focus();
+  });
+
+  $('bulk-modal-close-btn')?.addEventListener('click', () => $('bulk-edit-dialog')?.close());
+  $('bulk-modal-cancel-btn')?.addEventListener('click', () => $('bulk-edit-dialog')?.close());
+
+  // Bulk Edit Form Submission
+  $('bulk-edit-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const count = state.selectedRecipeIds.size;
+    if (count === 0) {
+      showToast('No recipes selected.', true);
+      $('bulk-edit-dialog')?.close();
+      return;
+    }
+
+    const applyCategory = $('bulk-apply-category')?.checked;
+    const applyLanguage = $('bulk-apply-language')?.checked;
+    const applySource = $('bulk-apply-source')?.checked;
+    const applyDietary = $('bulk-apply-dietary')?.checked;
+    const applyTags = $('bulk-apply-tags')?.checked;
+
+    if (!applyCategory && !applyLanguage && !applySource && !applyDietary && !applyTags) {
+      showToast('Please check at least one label to update.', true);
+      return;
+    }
+
+    const submitBtn = $('bulk-apply-submit-btn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Updating...';
+    }
+
+    try {
+      showToast(`Updating labels for ${count} recipes...`);
+      const newCategory = applyCategory ? ($('bulk-category-input')?.value.trim() || 'Other') : null;
+      const newLanguage = applyLanguage ? $('bulk-language-select')?.value : null;
+      const newSource = applySource ? $('bulk-source-select')?.value : null;
+      const dietaryMode = $('bulk-dietary-mode')?.value || 'replace';
+      const chosenDietary = applyDietary
+        ? Array.from(document.querySelectorAll('input[name="bulk-dietary"]:checked')).map((cb) => cb.value)
+        : null;
+      const tagsToAdd = applyTags
+        ? $('bulk-tags-input')?.value.split(',').map((t) => t.trim()).filter(Boolean)
+        : null;
+
+      const selectedIds = Array.from(state.selectedRecipeIds);
+
+      for (const id of selectedIds) {
+        const recipe = state.recipes.find((r) => r.id === id);
+        const updates = computeBulkRecipeUpdates(recipe, {
+          applyCategory,
+          newCategory,
+          applyLanguage,
+          newLanguage,
+          applySource,
+          newSource,
+          applyDietary,
+          chosenDietary,
+          dietaryMode,
+          applyTags,
+          tagsToAdd,
+        });
+
+        if (Object.keys(updates).length > 0) {
+          await bulkUpdateRecipes(state.user.uid, [id], updates);
+          if (recipe) {
+            Object.assign(recipe, updates);
+          }
+        }
+      }
+
+      state.selectedRecipeIds.clear();
+      state.isBulkMode = false;
+      populateCategoryFilter();
+      renderRecipeGrid();
+      $('bulk-edit-dialog')?.close();
+      showToast(`Successfully updated labels on ${count} recipes!`);
+    } catch (err) {
+      console.error('Bulk edit error:', err);
+      showToast(`Failed to update recipes: ${err.message}`, true);
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Apply Updates';
+      }
+    }
   });
 
   // Detail actions
