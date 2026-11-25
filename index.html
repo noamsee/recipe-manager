@@ -33,7 +33,7 @@
   <meta name="twitter:description" content="Your bilingual Hebrew & English kitchen library. Extract recipes from Instagram & Facebook Reels, WhatsApp chats, and OneNote." />
   <meta name="twitter:image" content="https://noamsee.github.io/recipe-manager/assets/og-share-card.png?v=3" />
 
-  <link rel="stylesheet" href="css/styles.css?v=11" />
+  <link rel="stylesheet" href="css/styles.css?v=12" />
   <script src="js/vendor/jszip.min.js"></script>
 </head>
 <body>
@@ -135,7 +135,7 @@
       <section id="view-editor" hidden>
         <div class="panel">
           <h2 id="editor-heading">New Recipe</h2>
-          <form id="editor-form" class="stack">
+          <form id="editor-form" class="stack" novalidate>
             <div class="grid-3">
               <label>Title <input id="edit-title" type="text" required /></label>
               <label>Language
@@ -159,7 +159,7 @@
               <label>Prep (min) <input id="edit-prep" type="number" min="0" /></label>
               <label>Cook (min) <input id="edit-cook" type="number" min="0" /></label>
             </div>
-            <label>Original Source URL <input id="edit-source-url" type="url" placeholder="https://www.instagram.com/reel/..." /></label>
+            <label>Original Source / URL <input id="edit-source-url" type="text" placeholder="https://... or PDF / book name" /></label>
             <label>Tags (comma-separated) <input id="edit-tags" type="text" placeholder="quick, pasta, weekend" /></label>
             <fieldset class="dietary-box">
               <legend>Dietary Tags</legend>
@@ -209,7 +209,8 @@
               <div class="photo-url-row">
                 <input
                   id="edit-thumb-url-input"
-                  type="url"
+                  type="text"
+                  inputmode="url"
                   placeholder="Or paste image web link (https://...jpg, .png)"
                   class="photo-url-input"
                 />
@@ -566,6 +567,6 @@
     </main>
   </div>
 
-  <script type="module" src="js/app.js?v=11"></script>
+  <script type="module" src="js/app.js?v=12"></script>
 </body>
 </html>

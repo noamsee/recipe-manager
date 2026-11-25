@@ -1135,6 +1135,13 @@ function bindEvents() {
 
   $('editor-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const title = $('edit-title')?.value.trim();
+    if (!title) {
+      showToast('Please enter a recipe title.', true);
+      $('edit-title')?.focus();
+      return;
+    }
+
     const dietary = Array.from(document.querySelectorAll('input[name="edit-dietary"]:checked')).map(
       (cb) => cb.value
     );
@@ -1158,30 +1165,35 @@ function bindEvents() {
 
     const sourceVal = $('edit-source')?.value || (existing?.source || 'Manual');
 
-    const id = await saveRecipe(
-      state.user.uid,
-      {
-        title: $('edit-title').value,
-        source: sourceVal,
-        language: $('edit-language').value,
-        category: $('edit-category').value.trim() || 'Other',
-        servings: $('edit-servings').value ? Number($('edit-servings').value) : null,
-        prepTimeMinutes: $('edit-prep').value ? Number($('edit-prep').value) : null,
-        cookTimeMinutes: $('edit-cook').value ? Number($('edit-cook').value) : null,
-        sourceUrl: $('edit-source-url').value.trim() || null,
-        tags,
-        dietary,
-        ingredients,
-        steps,
-        notes: $('edit-notes').value.trim(),
-        rating: existing?.rating || 0,
-        thumbnailDataUri: state.pendingThumbnailDataUri,
-      },
-      state.editingRecipeId
-    );
-    showToast('Recipe saved!');
-    await refreshLibrary();
-    openRecipeDetail(id);
+    try {
+      const id = await saveRecipe(
+        state.user.uid,
+        {
+          title,
+          source: sourceVal,
+          language: $('edit-language').value,
+          category: $('edit-category').value.trim() || 'Other',
+          servings: $('edit-servings').value ? Number($('edit-servings').value) : null,
+          prepTimeMinutes: $('edit-prep').value ? Number($('edit-prep').value) : null,
+          cookTimeMinutes: $('edit-cook').value ? Number($('edit-cook').value) : null,
+          sourceUrl: $('edit-source-url').value.trim() || null,
+          tags,
+          dietary,
+          ingredients,
+          steps,
+          notes: $('edit-notes').value.trim(),
+          rating: existing?.rating || 0,
+          thumbnailDataUri: state.pendingThumbnailDataUri,
+        },
+        state.editingRecipeId
+      );
+      showToast('Recipe saved!');
+      await refreshLibrary();
+      openRecipeDetail(id);
+    } catch (saveErr) {
+      console.error('Failed to save recipe:', saveErr);
+      showToast(`Failed to save recipe: ${saveErr.message}`, true);
+    }
   });
 
   // Import tabs
