@@ -45,7 +45,9 @@ import {
   resetQueueItemForRetry,
   runCaptionFallbackExtraction,
   runSingleReelExtraction,
+  saveImportSessionLog,
 } from './importer.js?v=5';
+import { extractRecipesFromZip, validateZipArchive } from './zip-importer.js?v=1';
 import {
   classifyQueueItems,
   computeNextStatusAndRetry,
@@ -81,6 +83,7 @@ const state = {
   pendingOneNoteRecipes: [],
   pendingOneNoteUnparsed: [],
   pendingOneNoteFailed: [],
+  pendingZipRecipes: [],
   filters: { search: '', category: 'ALL', language: 'ALL', dietary: 'ALL', source: 'ALL' },
   importQueue: [],
   importLogs: [],
@@ -570,6 +573,66 @@ function updateOneNoteSaveBtnText() {
   if (btn) btn.textContent = `Import Selected Recipes (${checked})`;
 }
 
+function updateZipSaveBtnText() {
+  const checked = document.querySelectorAll('.zip-pick:checked').length;
+  const btn = $('zip-save-btn');
+  if (btn) {
+    btn.textContent = `Import Selected Recipes (${checked})`;
+    btn.disabled = checked === 0;
+  }
+}
+
+function renderZipPreview() {
+  const container = $('zip-preview-list');
+  const previewCard = $('zip-preview-card');
+  const countEl = $('zip-preview-count');
+  const saveBtn = $('zip-save-btn');
+
+  if (container) container.innerHTML = '';
+  const recipes = state.pendingZipRecipes || [];
+  if (previewCard) previewCard.hidden = recipes.length === 0;
+  if (saveBtn) saveBtn.hidden = recipes.length === 0;
+  if (countEl) countEl.textContent = `Archive Recipes (${recipes.length})`;
+
+  if (container && recipes.length > 0) {
+    recipes.forEach((recipe, idx) => {
+      const card = document.createElement('div');
+      card.className = 'zip-pick-card';
+      applyDirection(card, recipe.title, recipe.language);
+
+      const thumbHtml = recipe.thumbnailDataUri
+        ? `<img src="${escapeHtml(recipe.thumbnailDataUri)}" class="zip-card-thumb" alt="Thumbnail" />`
+        : `<div class="zip-card-thumb-placeholder">${recipe.language === 'he' ? '🍲' : '🍽️'}</div>`;
+
+      const dietaryChips = (recipe.dietary || [])
+        .map((d) => `<span class="chip chip-dietary">${escapeHtml(d)}</span>`)
+        .join(' ');
+
+      card.innerHTML = `
+        <input type="checkbox" class="zip-pick" data-idx="${idx}" checked />
+        ${thumbHtml}
+        <div class="stack" style="gap: 0.25rem; flex: 1;">
+          <div class="row between">
+            <strong>${escapeHtml(recipe.title)}</strong>
+            <div class="row">
+              <span class="chip">${escapeHtml(recipe.language || 'he')}</span>
+              <span class="chip">${escapeHtml(recipe.category || 'Other')}</span>
+              ${recipe.servings ? `<span class="chip">${recipe.servings} מנות</span>` : ''}
+            </div>
+          </div>
+          <div class="muted small">
+            ${(recipe.ingredients || []).length} ingredients &bull; ${(recipe.steps || []).length} steps
+            ${recipe.hasThumbnail ? '&bull; 📷 Photo' : ''}
+            ${dietaryChips ? `&bull; ${dietaryChips}` : ''}
+          </div>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+    updateZipSaveBtnText();
+  }
+}
+
 function openManualEditorWithCandidate(candidate) {
   state.editingRecipeId = null;
   state.selectedRecipeId = null;
@@ -892,7 +955,7 @@ function bindEvents() {
       document.querySelectorAll('[data-import-tab]').forEach((b) =>
         b.classList.toggle('active', b === tabBtn)
       );
-      for (const pane of ['single-reel', 'batch-whatsapp', 'onenote', 'paste-text']) {
+      for (const pane of ['single-reel', 'batch-whatsapp', 'onenote', 'zip', 'paste-text']) {
         $(`pane-${pane}`).hidden = pane !== target;
       }
       if (target === 'batch-whatsapp') {
@@ -1077,7 +1140,7 @@ function bindEvents() {
     document.querySelectorAll('[data-import-tab]').forEach((b) =>
       b.classList.toggle('active', b.dataset.importTab === 'single-reel')
     );
-    for (const pane of ['single-reel', 'batch-whatsapp', 'onenote', 'paste-text']) {
+    for (const pane of ['single-reel', 'batch-whatsapp', 'onenote', 'zip', 'paste-text']) {
       $(`pane-${pane}`).hidden = pane !== 'single-reel';
     }
     const singleUrlInput = $('single-reel-url');
@@ -1653,6 +1716,244 @@ function bindEvents() {
     $('onenote-save-btn').disabled = false;
     $('onenote-status').textContent = `Finished: ${saved} saved, ${skipped} skipped (already in library), ${failed} failed.`;
     showToast(`OneNote import: ${saved} saved, ${skipped} skipped, ${failed} failed.`);
+  });
+
+  // ==========================================
+  // Zip Archive (.zip) Importer
+  // ==========================================
+
+  const loadZipSamplePackage = async (sampleName, displayName) => {
+    const statusEl = $('zip-status');
+    if (statusEl) {
+      statusEl.className = 'status-box muted';
+      statusEl.textContent = `Loading ${displayName}...`;
+    }
+    try {
+      const res = await fetch(`assets/samples/${sampleName}.json`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to load ${displayName}`);
+      const recipes = await res.json();
+      state.pendingZipRecipes = recipes;
+      renderZipPreview();
+      if (statusEl) {
+        statusEl.className = 'status-box success';
+        statusEl.textContent = `✅ Loaded ${recipes.length} recipes from "${displayName}". All recipes are pre-selected below. Click "Import Selected Recipes" to save them to your library.`;
+      }
+      $('zip-preview-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      if (statusEl) {
+        statusEl.className = 'status-box error';
+        statusEl.textContent = `❌ Failed to load sample package: ${err.message}`;
+      }
+      showToast(err.message, true);
+    }
+  };
+
+  $('zip-quick-all-btn')?.addEventListener('click', () => {
+    loadZipSamplePackage('all_samples', 'All 3 Collections (54 Recipes)');
+  });
+  $('zip-quick-soups-btn')?.addEventListener('click', () => {
+    loadZipSamplePackage('soups', 'Soups Collection (10 Recipes)');
+  });
+  $('zip-quick-salads-btn')?.addEventListener('click', () => {
+    loadZipSamplePackage('salads', 'Salads Collection (21 Recipes)');
+  });
+  $('zip-quick-sides-btn')?.addEventListener('click', () => {
+    loadZipSamplePackage('sides', 'Sides Collection (23 Recipes)');
+  });
+
+  $('zip-clear-file-btn')?.addEventListener('click', () => {
+    const fileInput = $('zip-file-input');
+    if (fileInput) fileInput.value = '';
+    const statusEl = $('zip-status');
+    if (statusEl) {
+      statusEl.className = 'status-box muted';
+      statusEl.textContent = '';
+    }
+    state.pendingZipRecipes = [];
+    renderZipPreview();
+  });
+
+  const processUploadedZip = async () => {
+    const file = $('zip-file-input')?.files?.[0];
+    const statusEl = $('zip-status');
+    if (!file) {
+      if (statusEl) {
+        statusEl.className = 'status-box error';
+        statusEl.textContent = 'Please choose a .zip file to upload.';
+      }
+      return showToast('Please choose a .zip file to upload.', true);
+    }
+
+    if (statusEl) {
+      statusEl.className = 'status-box muted';
+      statusEl.textContent = 'Checking zip format (recipes.json + images/)...';
+    }
+
+    try {
+      const validation = await validateZipArchive(file);
+      if (!validation.valid) {
+        if (statusEl) {
+          statusEl.className = 'status-box error';
+          statusEl.textContent = `❌ Format Error: ${validation.error}\n\nPlease verify that your .zip file contains a "recipes.json" file and an optional "images/" folder.`;
+        }
+        state.pendingZipRecipes = [];
+        renderZipPreview();
+        return showToast(validation.error, true);
+      }
+
+      if (statusEl) {
+        statusEl.className = 'status-box muted';
+        statusEl.textContent = `Format verified (${validation.recipesRaw.length} recipes, ${validation.imageCount} images). Extracting and structuring Hebrew recipe data...`;
+      }
+
+      const result = await extractRecipesFromZip(file, (p) => {
+        if (statusEl) {
+          statusEl.textContent = `Extracting recipe ${p.index} of ${p.total}: "${p.recipe.title}"...`;
+        }
+      });
+
+      state.pendingZipRecipes = result.recipes || [];
+      renderZipPreview();
+
+      if (statusEl) {
+        statusEl.className = 'status-box success';
+        statusEl.textContent = `✅ Format verified! Successfully extracted ${result.recipes.length} recipes and ${result.imageCount} photos. Select the recipes you wish to import below.`;
+      }
+      $('zip-preview-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      if (statusEl) {
+        statusEl.className = 'status-box error';
+        statusEl.textContent = `❌ Error reading zip: ${err.message}`;
+      }
+      state.pendingZipRecipes = [];
+      renderZipPreview();
+      showToast(err.message, true);
+    }
+  };
+
+  $('zip-verify-btn')?.addEventListener('click', processUploadedZip);
+  $('zip-file-input')?.addEventListener('change', () => {
+    const file = $('zip-file-input')?.files?.[0];
+    if (file) {
+      processUploadedZip();
+    }
+  });
+
+  $('zip-select-all-btn')?.addEventListener('click', () => {
+    document.querySelectorAll('.zip-pick').forEach((cb) => (cb.checked = true));
+    updateZipSaveBtnText();
+  });
+
+  $('zip-deselect-all-btn')?.addEventListener('click', () => {
+    document.querySelectorAll('.zip-pick').forEach((cb) => (cb.checked = false));
+    updateZipSaveBtnText();
+  });
+
+  $('zip-preview-list')?.addEventListener('change', (e) => {
+    if (e.target.classList.contains('zip-pick')) {
+      updateZipSaveBtnText();
+    }
+  });
+
+  $('zip-save-btn')?.addEventListener('click', async () => {
+    const selectedIndices = Array.from(document.querySelectorAll('.zip-pick:checked')).map((cb) =>
+      Number(cb.dataset.idx)
+    );
+    if (!selectedIndices.length) {
+      return showToast('Select at least one recipe to import.', true);
+    }
+
+    const saveBtn = $('zip-save-btn');
+    const statusEl = $('zip-status');
+    if (saveBtn) saveBtn.disabled = true;
+    if (statusEl) {
+      statusEl.className = 'status-box muted';
+      statusEl.textContent = `Importing ${selectedIndices.length} recipe(s) to library...`;
+    }
+
+    let saved = 0;
+    let skipped = 0;
+    let failed = 0;
+    const sessionLogDetails = [];
+    const remainingRecipes = [];
+
+    const existingTitles = new Set(
+      state.recipes.map((r) => (r.title || '').trim().toLowerCase()).filter(Boolean)
+    );
+
+    for (let i = 0; i < state.pendingZipRecipes.length; i += 1) {
+      const recipe = state.pendingZipRecipes[i];
+      if (!selectedIndices.includes(i)) {
+        remainingRecipes.push(recipe);
+        continue;
+      }
+
+      const normTitle = (recipe.title || '').trim().toLowerCase();
+      if (normTitle && existingTitles.has(normTitle)) {
+        skipped += 1;
+        sessionLogDetails.push({
+          url: recipe.sourceUrl || `Zip:${recipe.title}`,
+          status: 'skipped',
+          title: recipe.title,
+          message: `Recipe already exists ("${recipe.title}") - skipped to prevent overwrite.`,
+          timestamp: Date.now(),
+        });
+        continue;
+      }
+
+      try {
+        await saveRecipe(state.user.uid, {
+          ...recipe,
+          source: recipe.source || 'OneNote (PDF)',
+          tags: Array.from(new Set(['OneNote', recipe.category, ...(recipe.tags || [])])).filter(Boolean),
+        });
+        saved += 1;
+        if (normTitle) existingTitles.add(normTitle);
+        sessionLogDetails.push({
+          url: recipe.sourceUrl || `Zip:${recipe.title}`,
+          status: 'saved',
+          title: recipe.title,
+          timestamp: Date.now(),
+        });
+      } catch (err) {
+        failed += 1;
+        remainingRecipes.push(recipe);
+        sessionLogDetails.push({
+          url: recipe.sourceUrl || `Zip:${recipe.title}`,
+          status: 'failed',
+          title: recipe.title,
+          message: err.message,
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    try {
+      await saveImportSessionLog(state.user.uid, {
+        totalUrls: selectedIndices.length,
+        savedCount: saved,
+        skippedCount: skipped,
+        failedCount: failed,
+        unparsableCount: 0,
+        summaryText: `Zip archive import: ${saved} saved, ${skipped} skipped (already existed), ${failed} failed.`,
+        details: sessionLogDetails,
+      });
+    } catch (logErr) {
+      console.warn('Failed saving Zip import log:', logErr);
+    }
+
+    state.pendingZipRecipes = remainingRecipes;
+    renderZipPreview();
+    await refreshLibrary();
+    await refreshImportLogs();
+
+    if (saveBtn) saveBtn.disabled = false;
+    const finalMsg = `Zip import finished: ${saved} saved, ${skipped} skipped (already existed), ${failed} failed.`;
+    if (statusEl) {
+      statusEl.className = failed ? 'status-box error' : 'status-box success';
+      statusEl.textContent = `✅ ${finalMsg}`;
+    }
+    showToast(finalMsg);
   });
 
   // Shopping list actions

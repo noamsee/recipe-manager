@@ -33,7 +33,8 @@
   <meta name="twitter:description" content="Your bilingual Hebrew & English kitchen library. Extract recipes from Instagram & Facebook Reels, WhatsApp chats, and OneNote." />
   <meta name="twitter:image" content="https://noamsee.github.io/recipe-manager/assets/og-share-card.png?v=3" />
 
-  <link rel="stylesheet" href="css/styles.css?v=8" />
+  <link rel="stylesheet" href="css/styles.css?v=9" />
+  <script src="js/vendor/jszip.min.js"></script>
 </head>
 <body>
   <div id="toast" class="toast" hidden></div>
@@ -148,6 +149,7 @@
                   <option value="Manual">Manual</option>
                   <option value="Reel">Reel</option>
                   <option value="OneNote">OneNote</option>
+                  <option value="OneNote (PDF)">OneNote (PDF)</option>
                 </select>
               </label>
             </div>
@@ -200,7 +202,8 @@
           <div class="tab-bar">
             <button type="button" class="tab-btn active" data-import-tab="single-reel">Single Reel Link</button>
             <button type="button" class="tab-btn" data-import-tab="batch-whatsapp">Batch &amp; WhatsApp .txt</button>
-            <button type="button" class="tab-btn" data-import-tab="onenote">OneNote Export</button>
+            <button type="button" class="tab-btn" data-import-tab="onenote">OneNote (PDF)</button>
+            <button type="button" class="tab-btn" data-import-tab="zip">Zip Archive (.zip)</button>
             <button type="button" class="tab-btn" data-import-tab="paste-text">Paste Text</button>
           </div>
 
@@ -316,10 +319,10 @@
 
           <div id="pane-onenote" class="stack" hidden>
             <label>
-              Upload OneNote Export (.html, .docx, .pdf, .txt)
-              <input id="onenote-file-input" type="file" accept=".html,.htm,.docx,.pdf,.txt,.md" />
+              Upload OneNote (PDF) Export (.pdf, .docx, .html, .txt)
+              <input id="onenote-file-input" type="file" accept=".pdf,.html,.htm,.docx,.txt,.md" />
             </label>
-            <button id="onenote-parse-btn" type="button" class="btn-primary">Parse OneNote File</button>
+            <button id="onenote-parse-btn" type="button" class="btn-primary">Parse OneNote (PDF)</button>
             <p id="onenote-status" class="muted"></p>
 
             <!-- Parsed Recipes Preview -->
@@ -355,6 +358,63 @@
                 </div>
               </div>
               <div id="onenote-failed-list" class="queue-list stack"></div>
+            </div>
+          </div>
+
+          <!-- Zip Archive (.zip) Importer -->
+          <div id="pane-zip" class="stack" hidden>
+            <!-- Quick Import Section for Pre-Packaged / Attached Archives -->
+            <div class="zip-quick-card stack">
+              <div class="card-header-row">
+                <div>
+                  <h3 class="subheading">📦 One-Click Import Sample Collections</h3>
+                  <p class="muted small">Ready-to-import recipe packages with photos and structured Hebrew text (from your attached zip archives):</p>
+                </div>
+              </div>
+              <div class="row wrap zip-quick-buttons">
+                <button id="zip-quick-all-btn" type="button" class="btn-primary">
+                  Import All 3 Packages (54 Recipes)
+                </button>
+                <button id="zip-quick-soups-btn" type="button" class="btn-secondary">
+                  🥣 Soups (10 Recipes)
+                </button>
+                <button id="zip-quick-salads-btn" type="button" class="btn-secondary">
+                  🥗 Salads (21 Recipes)
+                </button>
+                <button id="zip-quick-sides-btn" type="button" class="btn-secondary">
+                  🥔 Sides (23 Recipes)
+                </button>
+              </div>
+            </div>
+
+            <div class="card-divider"><span>or upload a custom zip file</span></div>
+
+            <div class="stack">
+              <label>
+                Upload Zip Archive (.zip containing recipes.json &amp; images/ folder)
+                <input id="zip-file-input" type="file" accept=".zip,application/zip,application/x-zip-compressed" />
+              </label>
+              <p class="muted small">
+                <strong>Format check:</strong> The archive must be a valid <code>.zip</code> file containing a <code>recipes.json</code> file with recipe records and an optional <code>images/</code> folder for photos. If the format is invalid, a detailed error message will be displayed immediately.
+              </p>
+              <div class="row">
+                <button id="zip-verify-btn" type="button" class="btn-primary">Verify &amp; Preview Zip File</button>
+                <button id="zip-clear-file-btn" type="button" class="btn-ghost btn-sm">Clear</button>
+              </div>
+              <div id="zip-status" class="status-box muted"></div>
+            </div>
+
+            <!-- Zip Recipes Preview Card -->
+            <div id="zip-preview-card" class="stack" hidden>
+              <div class="row between">
+                <strong id="zip-preview-count">Archive Recipes (0)</strong>
+                <div class="row">
+                  <button id="zip-select-all-btn" type="button" class="btn-ghost btn-sm">Select All</button>
+                  <button id="zip-deselect-all-btn" type="button" class="btn-ghost btn-sm">Deselect All</button>
+                </div>
+              </div>
+              <div id="zip-preview-list" class="stack"></div>
+              <button id="zip-save-btn" type="button" class="btn-primary" hidden>Import Selected Recipes</button>
             </div>
           </div>
 
@@ -455,6 +515,6 @@
     </main>
   </div>
 
-  <script type="module" src="js/app.js?v=8"></script>
+  <script type="module" src="js/app.js?v=9"></script>
 </body>
 </html>
