@@ -22,35 +22,63 @@ const THUMBNAILS_COLLECTION = 'recipeThumbnails';
 const SHARES_COLLECTION = 'sharedRecipes';
 
 /**
- * Compress an uploaded image File/Blob or remote data URI into a compact JPEG data URI
+ * Compress an uploaded image File/Blob, base64 data URI, or remote image URL into a compact JPEG data URI
  * suitable for Spark-tier Firestore storage without requiring Firebase Storage billing.
  *
- * @param {File | Blob} file
+ * @param {File | Blob | string} input
  * @param {number} [maxWidth]
  * @param {number} [quality]
  * @returns {Promise<string>}
  */
-export function compressImageToDataUri(file, maxWidth = 600, quality = 0.78) {
+export function compressImageToDataUri(input, maxWidth = 600, quality = 0.78) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error('Failed to read image file.'));
-    reader.onload = () => {
+    if (!input) {
+      return reject(new Error('No image provided.'));
+    }
+
+    const processImageSource = (src) => {
       const img = new Image();
-      img.onerror = () => reject(new Error('Invalid image format.'));
-      img.onload = () => {
-        const scale = img.width > maxWidth ? maxWidth / img.width : 1;
-        const width = Math.round(img.width * scale);
-        const height = Math.round(img.height * scale);
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
+      img.crossOrigin = 'anonymous';
+      img.onerror = () => {
+        // If image failed to load and was a data URI or URL
+        if (typeof src === 'string' && src.startsWith('data:image/')) {
+          return resolve(src);
+        }
+        reject(new Error('Invalid image format or image could not be loaded.'));
       };
-      img.src = String(reader.result);
+      img.onload = () => {
+        try {
+          const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+          const width = Math.max(1, Math.round(img.width * scale));
+          const height = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch (canvasErr) {
+          // If tainted by CORS, fallback to the original source if it is already a data URI or valid URL
+          if (typeof src === 'string') {
+            resolve(src);
+          } else {
+            reject(new Error(`Failed to compress image: ${canvasErr.message}`));
+          }
+        }
+      };
+      img.src = src;
     };
-    reader.readAsDataURL(file);
+
+    if (typeof input === 'string') {
+      processImageSource(input.trim());
+    } else if (input instanceof Blob || (input && typeof input.size === 'number')) {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Failed to read image file.'));
+      reader.onload = () => processImageSource(String(reader.result));
+      reader.readAsDataURL(input);
+    } else {
+      reject(new Error('Unsupported image input type. Expected File, Blob, or URL string.'));
+    }
   });
 }
 

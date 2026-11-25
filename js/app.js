@@ -359,6 +359,8 @@ function updatePhotoPreviewUI(dataUri = '') {
   const container = $('edit-thumb-container');
   const removeBtn = $('edit-thumb-remove-btn');
   const fileInput = $('edit-thumb-file');
+  const pasteBox = $('edit-photo-pastebox');
+  const urlInput = $('edit-thumb-url-input');
 
   if (dataUri) {
     if (preview) {
@@ -366,6 +368,10 @@ function updatePhotoPreviewUI(dataUri = '') {
     }
     if (container) container.hidden = false;
     if (removeBtn) removeBtn.hidden = false;
+    if (pasteBox) {
+      pasteBox.innerHTML =
+        '<span class="pastebox-placeholder">📷 <strong>Picture attached.</strong> Right-click here &amp; Paste (or Ctrl+V) to replace</span>';
+    }
   } else {
     if (preview) {
       preview.src = '';
@@ -373,6 +379,11 @@ function updatePhotoPreviewUI(dataUri = '') {
     if (container) container.hidden = true;
     if (removeBtn) removeBtn.hidden = true;
     if (fileInput) fileInput.value = '';
+    if (urlInput) urlInput.value = '';
+    if (pasteBox) {
+      pasteBox.innerHTML =
+        '<span class="pastebox-placeholder">📋 <strong>Click or Right-Click here and select &quot;Paste&quot;</strong> (or press <strong>Ctrl+V</strong>)</span>';
+    }
   }
 }
 
@@ -901,17 +912,69 @@ function bindEvents() {
 
   // Editor form - Recipe Photo management (Upload, Paste from clipboard, Drag & Drop, Remove)
   const handleRecipePhotoFile = async (fileOrBlob) => {
-    if (!fileOrBlob) return;
+    if (!fileOrBlobOrUrl) return;
     try {
       showToast('Compressing photo...');
-      const dataUri = await compressImageToDataUri(fileOrBlob);
+      const dataUri = await compressImageToDataUri(fileOrBlobOrUrl);
       state.pendingThumbnailDataUri = dataUri;
       updatePhotoPreviewUI(dataUri);
-      showToast('Photo attached!');
+      showToast(successMsg);
     } catch (err) {
       console.error('Failed processing photo:', err);
       showToast(`Failed to process photo: ${err.message}`, true);
     }
+  };
+
+  const extractPhotoFromClipboardData = async (clipboardData) => {
+    if (!clipboardData) return false;
+
+    // 1. Check direct files (FileList)
+    if (clipboardData.files && clipboardData.files.length > 0) {
+      for (const file of clipboardData.files) {
+        if (file.type.startsWith('image/')) {
+          await handleRecipePhotoFile(file, 'Pasted picture from clipboard!');
+          return true;
+        }
+      }
+    }
+
+    // 2. Check DataTransfer items
+    if (clipboardData.items && clipboardData.items.length > 0) {
+      for (const item of clipboardData.items) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            await handleRecipePhotoFile(file, 'Pasted picture from clipboard!');
+            return true;
+          }
+        }
+      }
+    }
+
+    // 3. Check HTML snippet for <img> tag (common when copying from web pages / documents)
+    const html = clipboardData.getData('text/html');
+    if (html) {
+      const match = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
+      if (match && match[1]) {
+        await handleRecipePhotoFile(match[1], 'Pasted picture from webpage!');
+        return true;
+      }
+    }
+
+    // 4. Check plain text for data URI or web image URL
+    const text = clipboardData.getData('text/plain')?.trim();
+    if (text) {
+      if (text.startsWith('data:image/')) {
+        await handleRecipePhotoFile(text, 'Pasted image data attached!');
+        return true;
+      }
+      if (/^https?:\/\/.+/i.test(text)) {
+        await handleRecipePhotoFile(text, 'Loaded picture from pasted link!');
+        return true;
+      }
+    }
+
+    return false;
   };
 
   const removeRecipePhoto = () => {
@@ -923,14 +986,18 @@ function bindEvents() {
   $('edit-thumb-file')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      await handleRecipePhotoFile(file);
+      await handleRecipePhotoFile(file, 'Uploaded photo attached!');
     }
   });
 
   $('edit-thumb-remove-btn')?.addEventListener('click', removeRecipePhoto);
   $('edit-thumb-overlay-remove-btn')?.addEventListener('click', removeRecipePhoto);
 
+  // Explicit Paste from Clipboard button
   $('edit-thumb-paste-btn')?.addEventListener('click', async () => {
+    let handled = false;
+
+    // Attempt 1: navigator.clipboard.read() for images (PNG, JPEG blobs)
     if (navigator.clipboard && navigator.clipboard.read) {
       try {
         const items = await navigator.clipboard.read();
@@ -938,85 +1005,127 @@ function bindEvents() {
           const imageType = item.types.find((t) => t.startsWith('image/'));
           if (imageType) {
             const blob = await item.getType(imageType);
-            await handleRecipePhotoFile(blob);
-            return;
+            await handleRecipePhotoFile(blob, 'Pasted picture from clipboard!');
+            handled = true;
+            break;
           }
         }
-        showToast('No image in clipboard. Copy an image first, then paste.', true);
       } catch (err) {
-        showToast('Please click the box below and press Ctrl+V to paste your image.');
-        $('edit-photo-dropzone')?.focus();
+        console.warn('navigator.clipboard.read() error:', err);
       }
-    } else {
-      showToast('Please click the box below and press Ctrl+V to paste your image.');
-      $('edit-photo-dropzone')?.focus();
+    }
+
+    // Attempt 2: navigator.clipboard.readText() for image URLs or HTML
+    if (!handled && navigator.clipboard && navigator.clipboard.readText) {
+      try {
+        const text = (await navigator.clipboard.readText())?.trim();
+        if (text) {
+          if (text.startsWith('data:image/') || /^https?:\/\/.+/i.test(text)) {
+            await handleRecipePhotoFile(text, 'Loaded picture from clipboard link/data!');
+            handled = true;
+          } else if (text.includes('<img')) {
+            const match = /<img[^>]+src=["']([^"']+)["']/i.exec(text);
+            if (match && match[1]) {
+              await handleRecipePhotoFile(match[1], 'Loaded picture from clipboard HTML!');
+              handled = true;
+            }
+          }
+        }
+      } catch (textErr) {
+        console.warn('navigator.clipboard.readText() error:', textErr);
+      }
+    }
+
+    if (!handled) {
+      showToast(
+        'Click inside the box below and press Ctrl+V (or Right-Click & select Paste).',
+        true
+      );
+      const pasteBox = $('edit-photo-pastebox');
+      if (pasteBox) {
+        pasteBox.focus();
+        pasteBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     }
   });
 
-  // Dropzone drag & drop and paste support
-  const dropzone = $('edit-photo-dropzone');
-  if (dropzone) {
-    dropzone.addEventListener('click', () => {
-      dropzone.focus();
+  // Dedicated Contenteditable Paste Box (enables native browser right-click "Paste" & Ctrl+V)
+  const pasteBox = $('edit-photo-pastebox');
+  if (pasteBox) {
+    pasteBox.addEventListener('paste', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const processed = await extractPhotoFromClipboardData(e.clipboardData);
+      if (processed) {
+        pasteBox.innerHTML = '✅ <strong>Picture pasted successfully!</strong>';
+        setTimeout(() => {
+          if (pasteBox) {
+            pasteBox.innerHTML =
+              '<span class="pastebox-placeholder">📷 <strong>Picture attached.</strong> Right-click here &amp; Paste (or Ctrl+V) to replace</span>';
+          }
+        }, 3000);
+      } else {
+        showToast('No picture found on clipboard. Copy an image first, then paste here.', true);
+      }
     });
 
+    // Also support drag & drop directly on pastebox
     ['dragenter', 'dragover'].forEach((eventName) => {
-      dropzone.addEventListener(eventName, (e) => {
+      pasteBox.addEventListener(eventName, (e) => {
         e.preventDefault();
         e.stopPropagation();
-        dropzone.classList.add('drag-over');
+        pasteBox.classList.add('drag-over');
       });
     });
 
     ['dragleave', 'drop'].forEach((eventName) => {
-      dropzone.addEventListener(eventName, (e) => {
+      pasteBox.addEventListener(eventName, (e) => {
         e.preventDefault();
         e.stopPropagation();
-        dropzone.classList.remove('drag-over');
+        pasteBox.classList.remove('drag-over');
       });
     });
 
-    dropzone.addEventListener('drop', async (e) => {
+    pasteBox.addEventListener('drop', async (e) => {
       const file = e.dataTransfer?.files?.[0];
       if (file && file.type.startsWith('image/')) {
-        await handleRecipePhotoFile(file);
+        await handleRecipePhotoFile(file, 'Dropped picture attached!');
       } else {
         showToast('Please drop an image file (JPEG, PNG, WebP).', true);
       }
     });
   }
 
+  // Load Image from Web Link
+  $('edit-thumb-url-btn')?.addEventListener('click', async () => {
+    const url = $('edit-thumb-url-input')?.value.trim();
+    if (!url) return showToast('Please enter an image link (URL).', true);
+    await handleRecipePhotoFile(url, 'Picture loaded from link!');
+  });
+
   // Global paste handler while in editor view
   window.addEventListener('paste', async (e) => {
     if (state.activeView !== 'editor') return;
 
-    const items = e.clipboardData?.items;
-    if (!items) return;
+    const activeEl = document.activeElement;
+    const isOtherInput =
+      activeEl &&
+      (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') &&
+      activeEl.id !== 'edit-photo-pastebox';
 
-    let imageItem = null;
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        imageItem = item;
-        break;
-      }
+    // If typing in another text field and clipboard contains plain text without an image file, let standard text paste happen
+    const hasPlainText = Boolean(e.clipboardData?.getData('text/plain'));
+    const hasImageFile = Array.from(e.clipboardData?.items || []).some((it) =>
+      it.type.startsWith('image/')
+    );
+
+    if (isOtherInput && hasPlainText && !hasImageFile) {
+      return;
     }
 
-    if (imageItem) {
-      const activeEl = document.activeElement;
-      const isTextInput =
-        activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
-      const hasText = Array.from(items).some((it) => it.type === 'text/plain');
-
-      // If typing in a text field and text is also on clipboard, allow normal text paste
-      if (isTextInput && hasText && activeEl.id !== 'edit-photo-dropzone') {
-        return;
-      }
-
+    const processed = await extractPhotoFromClipboardData(e.clipboardData);
+    if (processed) {
       e.preventDefault();
-      const file = imageItem.getAsFile();
-      if (file) {
-        await handleRecipePhotoFile(file);
-      }
     }
   });
 

@@ -389,6 +389,63 @@ button {
   transform: scale(1.01);
 }
 
+.photo-paste-wrapper {
+  width: 100%;
+}
+
+.photo-pastebox {
+  border: 2px dashed #c44b2b;
+  border-radius: 8px;
+  padding: 1.1rem 1rem;
+  text-align: center;
+  background: rgba(196, 75, 43, 0.03);
+  cursor: text;
+  transition: all 0.2s ease;
+  outline: none;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.4;
+  user-select: text;
+}
+
+.photo-pastebox:focus {
+  border-color: #b91c1c;
+  background: rgba(196, 75, 43, 0.08);
+  box-shadow: 0 0 0 3px rgba(196, 75, 43, 0.2);
+}
+
+.photo-pastebox.drag-over {
+  border-color: #b91c1c;
+  background: rgba(196, 75, 43, 0.15);
+  transform: scale(1.01);
+}
+
+.pastebox-placeholder {
+  color: var(--text);
+  font-size: 0.9rem;
+  pointer-events: none;
+}
+
+.photo-url-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.photo-url-input {
+  flex: 1;
+  font-size: 0.85rem;
+  padding: 0.45rem 0.65rem;
+}
+
+.thumb-preview-wrapper {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
 .dropzone-hint {
   font-size: 0.88rem;
   color: var(--muted);
