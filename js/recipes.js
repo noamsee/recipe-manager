@@ -166,6 +166,12 @@ export async function saveRecipe(ownerUid, recipeData, existingId = null) {
       dataUri: thumbnailDataUri,
       updatedAt: serverTimestamp(),
     });
+  } else if (existingId && !thumbnailDataUri) {
+    try {
+      await deleteDoc(doc(db, THUMBNAILS_COLLECTION, recipeRef.id));
+    } catch (_) {
+      // Document may not exist in thumbnails collection
+    }
   }
 
   return recipeRef.id;

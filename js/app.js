@@ -354,6 +354,28 @@ function openRecipeDetail(recipeId) {
   }
 }
 
+function updatePhotoPreviewUI(dataUri = '') {
+  const preview = $('edit-thumb-preview');
+  const container = $('edit-thumb-container');
+  const removeBtn = $('edit-thumb-remove-btn');
+  const fileInput = $('edit-thumb-file');
+
+  if (dataUri) {
+    if (preview) {
+      preview.src = dataUri;
+    }
+    if (container) container.hidden = false;
+    if (removeBtn) removeBtn.hidden = false;
+  } else {
+    if (preview) {
+      preview.src = '';
+    }
+    if (container) container.hidden = true;
+    if (removeBtn) removeBtn.hidden = true;
+    if (fileInput) fileInput.value = '';
+  }
+}
+
 function openRecipeEditor(recipe = null) {
   state.editingRecipeId = recipe?.id || null;
   state.pendingThumbnailDataUri = recipe?.thumbnailDataUri || '';
@@ -383,13 +405,7 @@ function openRecipeEditor(recipe = null) {
     .join('\n');
   $('edit-steps').value = (recipe?.steps || []).join('\n');
 
-  const preview = $('edit-thumb-preview');
-  if (state.pendingThumbnailDataUri) {
-    preview.src = state.pendingThumbnailDataUri;
-    preview.hidden = false;
-  } else {
-    preview.hidden = true;
-  }
+  updatePhotoPreviewUI(state.pendingThumbnailDataUri);
 }
 
 function parseIngredientLine(line) {
@@ -675,8 +691,7 @@ function openManualEditorWithCandidate(candidate) {
     $('edit-source').value = 'OneNote';
   }
 
-  $('edit-thumb-preview').hidden = true;
-  $('edit-thumb-file').value = '';
+  updatePhotoPreviewUI(candidate.thumbnailDataUri || '');
 
   switchView('editor');
   window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -884,13 +899,125 @@ function bindEvents() {
     exportRecipesToPdf([recipe], { title: recipe.title });
   });
 
-  // Editor form
-  $('edit-thumb-file').addEventListener('change', async (e) => {
+  // Editor form - Recipe Photo management (Upload, Paste from clipboard, Drag & Drop, Remove)
+  const handleRecipePhotoFile = async (fileOrBlob) => {
+    if (!fileOrBlob) return;
+    try {
+      showToast('Compressing photo...');
+      const dataUri = await compressImageToDataUri(fileOrBlob);
+      state.pendingThumbnailDataUri = dataUri;
+      updatePhotoPreviewUI(dataUri);
+      showToast('Photo attached!');
+    } catch (err) {
+      console.error('Failed processing photo:', err);
+      showToast(`Failed to process photo: ${err.message}`, true);
+    }
+  };
+
+  const removeRecipePhoto = () => {
+    state.pendingThumbnailDataUri = '';
+    updatePhotoPreviewUI('');
+    showToast('Photo removed.');
+  };
+
+  $('edit-thumb-file')?.addEventListener('change', async (e) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    state.pendingThumbnailDataUri = await compressImageToDataUri(file);
-    $('edit-thumb-preview').src = state.pendingThumbnailDataUri;
-    $('edit-thumb-preview').hidden = false;
+    if (file) {
+      await handleRecipePhotoFile(file);
+    }
+  });
+
+  $('edit-thumb-remove-btn')?.addEventListener('click', removeRecipePhoto);
+  $('edit-thumb-overlay-remove-btn')?.addEventListener('click', removeRecipePhoto);
+
+  $('edit-thumb-paste-btn')?.addEventListener('click', async () => {
+    if (navigator.clipboard && navigator.clipboard.read) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = item.types.find((t) => t.startsWith('image/'));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            await handleRecipePhotoFile(blob);
+            return;
+          }
+        }
+        showToast('No image in clipboard. Copy an image first, then paste.', true);
+      } catch (err) {
+        showToast('Please click the box below and press Ctrl+V to paste your image.');
+        $('edit-photo-dropzone')?.focus();
+      }
+    } else {
+      showToast('Please click the box below and press Ctrl+V to paste your image.');
+      $('edit-photo-dropzone')?.focus();
+    }
+  });
+
+  // Dropzone drag & drop and paste support
+  const dropzone = $('edit-photo-dropzone');
+  if (dropzone) {
+    dropzone.addEventListener('click', () => {
+      dropzone.focus();
+    });
+
+    ['dragenter', 'dragover'].forEach((eventName) => {
+      dropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.add('drag-over');
+      });
+    });
+
+    ['dragleave', 'drop'].forEach((eventName) => {
+      dropzone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dropzone.classList.remove('drag-over');
+      });
+    });
+
+    dropzone.addEventListener('drop', async (e) => {
+      const file = e.dataTransfer?.files?.[0];
+      if (file && file.type.startsWith('image/')) {
+        await handleRecipePhotoFile(file);
+      } else {
+        showToast('Please drop an image file (JPEG, PNG, WebP).', true);
+      }
+    });
+  }
+
+  // Global paste handler while in editor view
+  window.addEventListener('paste', async (e) => {
+    if (state.activeView !== 'editor') return;
+
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    let imageItem = null;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        imageItem = item;
+        break;
+      }
+    }
+
+    if (imageItem) {
+      const activeEl = document.activeElement;
+      const isTextInput =
+        activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+      const hasText = Array.from(items).some((it) => it.type === 'text/plain');
+
+      // If typing in a text field and text is also on clipboard, allow normal text paste
+      if (isTextInput && hasText && activeEl.id !== 'edit-photo-dropzone') {
+        return;
+      }
+
+      e.preventDefault();
+      const file = imageItem.getAsFile();
+      if (file) {
+        await handleRecipePhotoFile(file);
+      }
+    }
   });
 
   $('editor-cancel-btn').addEventListener('click', () => {
