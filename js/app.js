@@ -911,29 +911,40 @@ function bindEvents() {
   });
 
   // Editor form - Recipe Photo management (Upload, Paste from clipboard, Drag & Drop, Remove)
-  const handleRecipePhotoFile = async (fileOrBlob) => {
+  const handleRecipePhotoFile = async (fileOrBlobOrUrl, successMsg = 'Photo attached!') => {
     if (!fileOrBlobOrUrl) return;
     try {
-      showToast('Compressing photo...');
+      showToast('Loading & processing photo...');
       const dataUri = await compressImageToDataUri(fileOrBlobOrUrl);
       state.pendingThumbnailDataUri = dataUri;
       updatePhotoPreviewUI(dataUri);
       showToast(successMsg);
+      return dataUri;
     } catch (err) {
       console.error('Failed processing photo:', err);
       showToast(`Failed to process photo: ${err.message}`, true);
+      throw err;
     }
   };
 
   const extractPhotoFromClipboardData = async (clipboardData) => {
     if (!clipboardData) return false;
 
+    const tryProcess = async (candidate, msg) => {
+      try {
+        await handleRecipePhotoFile(candidate, msg);
+        return true;
+      } catch (err) {
+        console.warn('Clipboard candidate processing failed:', err);
+        return false;
+      }
+    };
+
     // 1. Check direct files (FileList)
     if (clipboardData.files && clipboardData.files.length > 0) {
       for (const file of clipboardData.files) {
-        if (file.type.startsWith('image/')) {
-          await handleRecipePhotoFile(file, 'Pasted picture from clipboard!');
-          return true;
+        if (file && file.type && file.type.startsWith('image/')) {
+          if (await tryProcess(file, 'Pasted picture from clipboard!')) return true;
         }
       }
     }
@@ -941,36 +952,32 @@ function bindEvents() {
     // 2. Check DataTransfer items
     if (clipboardData.items && clipboardData.items.length > 0) {
       for (const item of clipboardData.items) {
-        if (item.type.startsWith('image/')) {
+        if (item && item.type && item.type.startsWith('image/')) {
           const file = item.getAsFile();
           if (file) {
-            await handleRecipePhotoFile(file, 'Pasted picture from clipboard!');
-            return true;
+            if (await tryProcess(file, 'Pasted picture from clipboard!')) return true;
           }
         }
       }
     }
 
     // 3. Check HTML snippet for <img> tag (common when copying from web pages / documents)
-    const html = clipboardData.getData('text/html');
+    const html = clipboardData.getData ? clipboardData.getData('text/html') : '';
     if (html) {
       const match = /<img[^>]+src=["']([^"']+)["']/i.exec(html);
       if (match && match[1]) {
-        await handleRecipePhotoFile(match[1], 'Pasted picture from webpage!');
-        return true;
+        if (await tryProcess(match[1], 'Pasted picture from webpage!')) return true;
       }
     }
 
     // 4. Check plain text for data URI or web image URL
-    const text = clipboardData.getData('text/plain')?.trim();
+    const text = clipboardData.getData ? clipboardData.getData('text/plain')?.trim() : '';
     if (text) {
       if (text.startsWith('data:image/')) {
-        await handleRecipePhotoFile(text, 'Pasted image data attached!');
-        return true;
+        if (await tryProcess(text, 'Pasted image data attached!')) return true;
       }
       if (/^https?:\/\/.+/i.test(text)) {
-        await handleRecipePhotoFile(text, 'Loaded picture from pasted link!');
-        return true;
+        if (await tryProcess(text, 'Loaded picture from pasted link!')) return true;
       }
     }
 
@@ -1097,10 +1104,19 @@ function bindEvents() {
   }
 
   // Load Image from Web Link
-  $('edit-thumb-url-btn')?.addEventListener('click', async () => {
+  const loadPhotoFromUrlInput = async () => {
     const url = $('edit-thumb-url-input')?.value.trim();
     if (!url) return showToast('Please enter an image link (URL).', true);
     await handleRecipePhotoFile(url, 'Picture loaded from link!');
+  };
+
+  $('edit-thumb-url-btn')?.addEventListener('click', loadPhotoFromUrlInput);
+  $('edit-thumb-url-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      loadPhotoFromUrlInput();
+    }
   });
 
   // Global paste handler while in editor view
@@ -1111,10 +1127,11 @@ function bindEvents() {
     const isOtherInput =
       activeEl &&
       (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA') &&
-      activeEl.id !== 'edit-photo-pastebox';
+      activeEl.id !== 'edit-photo-pastebox' &&
+      activeEl.id !== 'edit-thumb-url-input';
 
     // If typing in another text field and clipboard contains plain text without an image file, let standard text paste happen
-    const hasPlainText = Boolean(e.clipboardData?.getData('text/plain'));
+    const hasPlainText = Boolean(e.clipboardData?.getData ? e.clipboardData.getData('text/plain') : '');
     const hasImageFile = Array.from(e.clipboardData?.items || []).some((it) =>
       it.type.startsWith('image/')
     );

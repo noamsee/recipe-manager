@@ -36,49 +36,149 @@ export function compressImageToDataUri(input, maxWidth = 600, quality = 0.78) {
       return reject(new Error('No image provided.'));
     }
 
-    const processImageSource = (src) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onerror = () => {
-        // If image failed to load and was a data URI or URL
-        if (typeof src === 'string' && src.startsWith('data:image/')) {
-          return resolve(src);
+    const canvasFromImage = (img, fallbackSrc = '') => {
+      try {
+        const origWidth = img.naturalWidth || img.width || 0;
+        const origHeight = img.naturalHeight || img.height || 0;
+        if (!origWidth || !origHeight) {
+          if (fallbackSrc) return fallbackSrc;
+          throw new Error('Image dimensions are 0.');
         }
-        reject(new Error('Invalid image format or image could not be loaded.'));
-      };
-      img.onload = () => {
-        try {
-          const scale = img.width > maxWidth ? maxWidth / img.width : 1;
-          const width = Math.max(1, Math.round(img.width * scale));
-          const height = Math.max(1, Math.round(img.height * scale));
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', quality));
-        } catch (canvasErr) {
-          // If tainted by CORS, fallback to the original source if it is already a data URI or valid URL
-          if (typeof src === 'string') {
-            resolve(src);
-          } else {
-            reject(new Error(`Failed to compress image: ${canvasErr.message}`));
-          }
+        const scale = origWidth > maxWidth ? maxWidth / origWidth : 1;
+        const width = Math.max(1, Math.round(origWidth * scale));
+        const height = Math.max(1, Math.round(origHeight * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        return canvas.toDataURL('image/jpeg', quality);
+      } catch (canvasErr) {
+        // If canvas is tainted by CORS (or canvas error), fallback to original source
+        if (fallbackSrc) {
+          return fallbackSrc;
         }
-      };
-      img.src = src;
+        throw canvasErr;
+      }
     };
 
-    if (typeof input === 'string') {
-      processImageSource(input.trim());
-    } else if (input instanceof Blob || (input && typeof input.size === 'number')) {
+    // Case 1: File or Blob (from input[type=file], clipboard file, or drag-and-drop)
+    if (input instanceof Blob || (input && typeof input.size === 'number')) {
       const reader = new FileReader();
       reader.onerror = () => reject(new Error('Failed to read image file.'));
-      reader.onload = () => processImageSource(String(reader.result));
+      reader.onload = () => {
+        const dataUrl = String(reader.result);
+        const img = new Image();
+        // Do NOT set crossOrigin on local data URLs
+        img.onerror = () => reject(new Error('Invalid image file format.'));
+        img.onload = () => {
+          try {
+            resolve(canvasFromImage(img, dataUrl));
+          } catch (_) {
+            resolve(dataUrl);
+          }
+        };
+        img.src = dataUrl;
+      };
       reader.readAsDataURL(input);
-    } else {
-      reject(new Error('Unsupported image input type. Expected File, Blob, or URL string.'));
+      return;
     }
+
+    // Case 2: String (data URI or web link)
+    if (typeof input === 'string') {
+      const trimmed = input.trim();
+      if (!trimmed) {
+        return reject(new Error('Image input was empty.'));
+      }
+
+      // If already a base64 data URI
+      if (trimmed.startsWith('data:image/')) {
+        const img = new Image();
+        // Do NOT set crossOrigin on data URLs
+        img.onerror = () => resolve(trimmed);
+        img.onload = () => {
+          try {
+            resolve(canvasFromImage(img, trimmed));
+          } catch (_) {
+            resolve(trimmed);
+          }
+        };
+        img.src = trimmed;
+        return;
+      }
+
+      // If it is an HTTP or HTTPS web link
+      if (/^https?:\/\//i.test(trimmed)) {
+        // First try to fetch the image as a Blob to bypass canvas origin tainting when CORS is allowed
+        if (typeof fetch === 'function') {
+          fetch(trimmed, { mode: 'cors' })
+            .then((res) => {
+              if (res.ok) return res.blob();
+              throw new Error(`HTTP ${res.status}`);
+            })
+            .then((blob) => {
+              if (blob && blob.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const dataUrl = String(reader.result);
+                  const img = new Image();
+                  img.onload = () => {
+                    try {
+                      resolve(canvasFromImage(img, dataUrl));
+                    } catch (_) {
+                      resolve(dataUrl);
+                    }
+                  };
+                  img.onerror = () => resolve(trimmed);
+                  img.src = dataUrl;
+                };
+                reader.readAsDataURL(blob);
+                return;
+              }
+              throw new Error('Not an image blob');
+            })
+            .catch(() => {
+              // If fetch fails (CORS restriction), load directly into an Image element without crossOrigin
+              const img = new Image();
+              img.onerror = () => {
+                reject(
+                  new Error('Image could not be loaded from this link. Please verify the URL.')
+                );
+              };
+              img.onload = () => {
+                try {
+                  const dataUri = canvasFromImage(img, trimmed);
+                  resolve(dataUri);
+                } catch (_) {
+                  // Fallback: URL itself will display in <img> preview and library cards
+                  resolve(trimmed);
+                }
+              };
+              img.src = trimmed;
+            });
+          return;
+        }
+
+        // Direct Image fallback
+        const img = new Image();
+        img.onerror = () => reject(new Error('Image could not be loaded from this link.'));
+        img.onload = () => {
+          try {
+            resolve(canvasFromImage(img, trimmed));
+          } catch (_) {
+            resolve(trimmed);
+          }
+        };
+        img.src = trimmed;
+        return;
+      }
+
+      return reject(
+        new Error('Invalid image format. Expected a file, data URI, or web link (https://...).')
+      );
+    }
+
+    reject(new Error('Unsupported image input type.'));
   });
 }
 
